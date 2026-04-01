@@ -90,7 +90,32 @@ export function useSessionState(sessionId: string | null) {
 export function useSessionPorts(sessionId: string | null): PortInfo[] {
   const s = useStore();
   if (!sessionId) return [];
-  return s.sessionStates.get(sessionId)?.ports ?? [];
+  const state = s.sessionStates.get(sessionId);
+  if (!state) return [];
+
+  // Derive ports from actual process data (PID-scoped) instead of PortMonitor
+  const seen = new Set<number>();
+  const ports: PortInfo[] = [];
+
+  for (const proc of state.processState?.processes ?? []) {
+    for (const port of proc.ports) {
+      if (!seen.has(port)) {
+        seen.add(port);
+        ports.push({ port, process: proc.name, pid: proc.pid, detectedFrom: "scan", detectedAt: "" });
+      }
+    }
+  }
+  for (const proc of state.runnerState?.processes ?? []) {
+    if (proc.exitCode !== null) continue;
+    for (const port of proc.ports) {
+      if (!seen.has(port)) {
+        seen.add(port);
+        ports.push({ port, process: proc.command, pid: proc.pid, detectedFrom: "scan", detectedAt: "" });
+      }
+    }
+  }
+
+  return ports;
 }
 
 export function useSessionProcesses(sessionId: string | null): SessionProcessState {

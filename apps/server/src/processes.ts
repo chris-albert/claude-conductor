@@ -39,8 +39,6 @@ const IGNORED_PORTS = new Set([22, 53, 80, 443]);
  */
 export class ProcessManager extends EventEmitter {
   private sessions = new Map<string, SessionProcessState>();
-  /** Port → sessionId (from output-based port detection) */
-  private portToSession = new Map<number, string>();
   /** PID → sessionId (from snapshot-based detection) */
   private pidToSession = new Map<number, string>();
   /** PID → toolUseId (links a process to the command that spawned it) */
@@ -75,9 +73,6 @@ export class ProcessManager extends EventEmitter {
   }
 
   untrackSession(sessionId: string) {
-    for (const [port, sid] of this.portToSession) {
-      if (sid === sessionId) this.portToSession.delete(port);
-    }
     for (const [pid, sid] of this.pidToSession) {
       if (sid === sessionId) {
         this.stopOutputCapture(pid);
@@ -152,29 +147,42 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  /** Associate a port with a session (called when port detected from tool output) */
-  associatePort(sessionId: string, port: number) {
-    this.portToSession.set(port, sessionId);
-  }
-
   getState(sessionId: string): SessionProcessState {
     return this.sessions.get(sessionId) ?? { commands: [], processes: [] };
   }
 
   async killProcess(pid: number): Promise<boolean> {
-    return new Promise((resolve) => {
+    // Send SIGTERM first
+    const termOk = await new Promise<boolean>((resolve) => {
       execFile("kill", ["-TERM", String(pid)], { timeout: 5000 }, (err) => {
-        if (!err) {
-          this.stopOutputCapture(pid);
-          this.pidOutput.delete(pid);
-          this.pidToSession.delete(pid);
-          this.pidToToolUseId.delete(pid);
-          this.baselinePids.delete(pid);
-          setTimeout(() => this.scan(), 500);
-        }
         resolve(!err);
       });
     });
+
+    if (termOk) {
+      // Wait briefly, then check if process is still alive and escalate to SIGKILL
+      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise<void>((resolve) => {
+        execFile("kill", ["-0", String(pid)], (err) => {
+          if (!err) {
+            // Still alive — force kill
+            execFile("kill", ["-KILL", String(pid)], () => resolve());
+          } else {
+            resolve();
+          }
+        });
+      });
+    }
+
+    // Clean up state regardless
+    this.stopOutputCapture(pid);
+    this.pidOutput.delete(pid);
+    this.pidToSession.delete(pid);
+    this.pidToToolUseId.delete(pid);
+    this.baselinePids.delete(pid);
+    setTimeout(() => this.scan(), 500);
+
+    return termOk;
   }
 
   async scan() {
@@ -200,21 +208,7 @@ export class ProcessManager extends EventEmitter {
     const sessionProcs = new Map<string, ProcessInfo[]>();
 
     for (const proc of listening) {
-      let sessionId = this.pidToSession.get(proc.pid) ?? null;
-
-      // Fallback: check port → session mapping
-      if (!sessionId) {
-        for (const port of proc.ports) {
-          const sid = this.portToSession.get(port);
-          if (sid) {
-            sessionId = sid;
-            break;
-          }
-        }
-        // Record PID association if found via port
-        if (sessionId) this.pidToSession.set(proc.pid, sessionId);
-      }
-
+      const sessionId = this.pidToSession.get(proc.pid) ?? null;
       if (!sessionId) continue; // Not a Claude-spawned process
       if (this.excludePids.has(proc.pid)) continue; // Managed by RunnerManager
 
@@ -393,7 +387,6 @@ export class ProcessManager extends EventEmitter {
     }
     this.outputDebounce.clear();
     this.sessions.clear();
-    this.portToSession.clear();
     this.pidToSession.clear();
     this.pidToToolUseId.clear();
     this.baselinePids.clear();

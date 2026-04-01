@@ -1,8 +1,5 @@
-import { spawn, execSync, type ChildProcess } from "child_process";
-import { existsSync } from "fs";
-import { join } from "path";
+import { spawn, execFile, execSync, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
-import { extractPortsFromText } from "./ports.js";
 
 export interface RunnerProcess {
   id: string;
@@ -123,6 +120,7 @@ export class RunnerManager extends EventEmitter {
   private children = new Map<string, ChildProcess>();
   private sessionProcesses = new Map<string, Set<string>>();
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private portScanTimer: ReturnType<typeof setInterval> | null = null;
   private model = "claude-sonnet-4-6";
 
   setModel(model: string) {
@@ -158,6 +156,7 @@ export class RunnerManager extends EventEmitter {
 
     // Start the auto-fix loop in the background
     this.autoFixLoop(id, sessionId, command, cwd, 0);
+    this.startPortScanning();
 
     return proc;
   }
@@ -169,20 +168,38 @@ export class RunnerManager extends EventEmitter {
     return this.rawSpawn(sessionId, command, cwd);
   }
 
-  kill(runnerId: string): boolean {
+  async kill(runnerId: string): Promise<boolean> {
     const child = this.children.get(runnerId);
     const proc = this.processes.get(runnerId);
     if (!child || !proc) return false;
-    try {
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        try { if (!child.killed) child.kill("SIGKILL"); } catch { /* */ }
-      }, 5000);
-      return true;
-    } catch { return false; }
+
+    // Kill the entire process tree (shell → npm → node, etc.)
+    const descendants = proc.pid > 0 ? await this.getDescendantPids(proc.pid) : [];
+
+    // Kill descendants bottom-up first, then the root
+    for (const pid of descendants.reverse()) {
+      try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
+    }
+    try { child.kill("SIGTERM"); } catch { /* already dead */ }
+
+    // Mark as killed immediately so UI updates
+    proc.exitCode = proc.exitCode ?? 143; // 128 + 15 (SIGTERM)
+    this.children.delete(runnerId);
+    this.emitChange(proc.sessionId);
+
+    // Escalate to SIGKILL after 3 seconds for any survivors
+    setTimeout(async () => {
+      const remaining = proc.pid > 0 ? await this.getDescendantPids(proc.pid) : [];
+      for (const pid of remaining) {
+        try { process.kill(pid, "SIGKILL"); } catch { /* */ }
+      }
+      try { if (!child.killed) child.kill("SIGKILL"); } catch { /* */ }
+    }, 3000);
+
+    return true;
   }
 
-  killByPid(pid: number): boolean {
+  async killByPid(pid: number): Promise<boolean> {
     for (const [id, proc] of this.processes) {
       if (proc.pid === pid && proc.exitCode === null) {
         return this.kill(id);
@@ -210,10 +227,10 @@ export class RunnerManager extends EventEmitter {
     return pids;
   }
 
-  cleanupSession(sessionId: string) {
+  async cleanupSession(sessionId: string) {
     const ids = this.sessionProcesses.get(sessionId);
     if (!ids) return;
-    for (const id of [...ids]) this.kill(id);
+    await Promise.all([...ids].map((id) => this.kill(id)));
     setTimeout(() => {
       for (const id of [...ids]) {
         this.processes.delete(id);
@@ -224,6 +241,7 @@ export class RunnerManager extends EventEmitter {
   }
 
   stopAll() {
+    this.stopPortScanning();
     for (const [, child] of this.children) {
       try { child.kill("SIGTERM"); } catch { /* */ }
     }
@@ -312,8 +330,8 @@ export class RunnerManager extends EventEmitter {
       this.appendOutput(id, `\n━━ Process running (PID ${proc.pid}) ━━\n`);
 
       // Set up exit handler for if it dies later
-      child.on("exit", (code) => {
-        proc.exitCode = code;
+      child.on("exit", (code, signal) => {
+        proc.exitCode = code ?? (signal ? 128 : 1);
         this.children.delete(id);
         this.emitChange(sessionId);
       });
@@ -398,6 +416,7 @@ export class RunnerManager extends EventEmitter {
     child.on("error", (err) => this.appendOutput(id, `[error] ${err.message}\n`));
 
     this.emitChange(sessionId);
+    this.startPortScanning();
     return proc;
   }
 
@@ -410,11 +429,6 @@ export class RunnerManager extends EventEmitter {
       proc.output = proc.output.slice(-40_000);
     }
 
-    const ports = extractPortsFromText(text);
-    for (const port of ports) {
-      if (!proc.ports.includes(port)) proc.ports.push(port);
-    }
-
     if (!this.debounceTimers.has(runnerId)) {
       this.debounceTimers.set(
         runnerId,
@@ -423,6 +437,127 @@ export class RunnerManager extends EventEmitter {
           this.emitChange(proc.sessionId);
         }, 500)
       );
+    }
+  }
+
+  /**
+   * Get all descendant PIDs of a process (children, grandchildren, etc.).
+   * Walks the full process tree since the listening process may be several
+   * levels deep (e.g. shell → npm → node).
+   */
+  private getDescendantPids(rootPid: number): Promise<number[]> {
+    return new Promise((resolve) => {
+      // Get full PID/PPID table and walk it to find all descendants
+      execFile("ps", ["-eo", "pid=,ppid="], { timeout: 3000 }, (err, stdout) => {
+        if (err || !stdout) {
+          resolve([]);
+          return;
+        }
+        const children = new Map<number, number[]>();
+        for (const line of stdout.trim().split("\n")) {
+          const m = line.trim().match(/^(\d+)\s+(\d+)$/);
+          if (!m) continue;
+          const pid = parseInt(m[1], 10);
+          const ppid = parseInt(m[2], 10);
+          if (!children.has(ppid)) children.set(ppid, []);
+          children.get(ppid)!.push(pid);
+        }
+        // BFS to collect all descendants
+        const result: number[] = [];
+        const queue = children.get(rootPid) ?? [];
+        while (queue.length > 0) {
+          const pid = queue.shift()!;
+          result.push(pid);
+          const grandchildren = children.get(pid);
+          if (grandchildren) queue.push(...grandchildren);
+        }
+        resolve(result);
+      });
+    });
+  }
+
+  /**
+   * Scan actual listening ports for all running runner processes using lsof.
+   * Includes child processes since shell: true means the tracked PID is the
+   * shell, not the actual server.
+   */
+  private async scanPorts() {
+    const runningPids: number[] = [];
+    // Map child PID back to the runner PID it belongs to
+    const childToRunner = new Map<number, number>();
+
+    for (const proc of this.processes.values()) {
+      if (proc.exitCode === null && proc.pid > 0) runningPids.push(proc.pid);
+    }
+    if (runningPids.length === 0) return;
+
+    // Collect child PIDs for all runners
+    const allPids = [...runningPids];
+    await Promise.all(
+      runningPids.map(async (pid) => {
+        const children = await this.getDescendantPids(pid);
+        for (const child of children) {
+          childToRunner.set(child, pid);
+          allPids.push(child);
+        }
+      })
+    );
+
+    const pidPorts = await new Promise<Map<number, number[]>>((resolve) => {
+      execFile(
+        "lsof",
+        ["-a", "-p", allPids.join(","), "-i", "-P", "-n", "-sTCP:LISTEN"],
+        { timeout: 5000 },
+        (err, stdout) => {
+          // Accumulate ports per runner PID (not per child PID)
+          const map = new Map<number, number[]>();
+          if (err || !stdout) {
+            resolve(map);
+            return;
+          }
+          const lines = stdout.trim().split("\n").slice(1);
+          for (const line of lines) {
+            const cols = line.split(/\s+/);
+            if (cols.length < 9) continue;
+            const lsofPid = parseInt(cols[1], 10);
+            const portMatch = cols[8].match(/:(\d+)$/);
+            if (!portMatch) continue;
+            const port = parseInt(portMatch[1], 10);
+            if (port < 1024) continue;
+            // Map back to the runner PID
+            const runnerPid = childToRunner.get(lsofPid) ?? lsofPid;
+            if (!map.has(runnerPid)) map.set(runnerPid, []);
+            if (!map.get(runnerPid)!.includes(port)) map.get(runnerPid)!.push(port);
+          }
+          resolve(map);
+        }
+      );
+    });
+
+    const changedSessions = new Set<string>();
+    for (const proc of this.processes.values()) {
+      if (proc.exitCode !== null || proc.pid <= 0) continue;
+      const realPorts = (pidPorts.get(proc.pid) ?? []).sort((a, b) => a - b);
+      const oldPorts = JSON.stringify(proc.ports);
+      if (JSON.stringify(realPorts) !== oldPorts) {
+        proc.ports = realPorts;
+        changedSessions.add(proc.sessionId);
+      }
+    }
+    for (const sessionId of changedSessions) {
+      this.emitChange(sessionId);
+    }
+  }
+
+  private startPortScanning() {
+    if (this.portScanTimer) return;
+    this.portScanTimer = setInterval(() => this.scanPorts(), 3000);
+  }
+
+  private stopPortScanning() {
+    if (this.portScanTimer) {
+      clearInterval(this.portScanTimer);
+      this.portScanTimer = null;
     }
   }
 

@@ -49,7 +49,6 @@ export function setupWebSocket(
   });
 
   portMonitor.on("change", ({ sessionId, ports }) => {
-    for (const p of ports) processManager.associatePort(sessionId, p.port);
     const msg = JSON.stringify({ type: "port_change", sessionId, data: { ports } });
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.send(msg);
@@ -281,7 +280,7 @@ export function setupWebSocket(
       // --- Kill process ---
       if (msg.type === "kill_process" && msg.pid) {
         // Try runner first, then process manager
-        let ok = runnerManager.killByPid(msg.pid);
+        let ok = await runnerManager.killByPid(msg.pid);
         if (!ok) ok = await processManager.killProcess(msg.pid);
         ws.send(JSON.stringify({ type: "process_killed", data: { pid: msg.pid, success: ok } }));
         return;
@@ -302,7 +301,7 @@ export function setupWebSocket(
 
       // --- Kill runner process ---
       if (msg.type === "kill_runner" && msg.runnerId) {
-        const ok = runnerManager.kill(msg.runnerId);
+        const ok = await runnerManager.kill(msg.runnerId);
         ws.send(JSON.stringify({ type: "runner_killed", data: { runnerId: msg.runnerId, success: ok } }));
         return;
       }
