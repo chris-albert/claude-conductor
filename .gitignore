@@ -1,0 +1,10 @@
+node_modules
+dist
+.turbo
+*.tsbuildinfo
+.conductor
+# Electron builder output
+release/
+*.dmg
+*.exe
+*.AppImage

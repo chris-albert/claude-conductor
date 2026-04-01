@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-bg: #0f0f14;
+  --c-bg-raised: #16161d;
+  --c-surface: #1c1c26;
+  --c-surface-hover: #22222e;
+  --c-surface-active: #282836;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a3a transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a3a;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a4e;
+}
+
+/* Selection */
+::selection {
+  background: rgba(124, 108, 240, 0.3);
+}
+
+/* Focus rings */
+*:focus-visible {
+  outline: 1px solid #7c6cf0;
+  outline-offset: -1px;
+}
+
+/* Smooth transitions */
+button,
+a,
+input,
+textarea {
+  transition: all 0.15s ease;
+}
+
+/* Custom textarea for chat input */
+.chat-input {
+  field-sizing: content;
+  min-height: 40px;
+  max-height: 160px;
+}
+
+/* Markdown prose */
+.prose-container {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #e8e8ed;
+}
+
+.prose-container p {
+  margin: 0.25em 0;
+}
+
+.prose-container h1,
+.prose-container h2,
+.prose-container h3,
+.prose-container h4 {
+  font-weight: 600;
+  margin: 0.75em 0 0.25em;
+  color: #e8e8ed;
+}
+
+.prose-container h1 { font-size: 1.3em; }
+.prose-container h2 { font-size: 1.15em; }
+.prose-container h3 { font-size: 1.05em; }
+
+.prose-container ul,
+.prose-container ol {
+  margin: 0.25em 0;
+  padding-left: 1.5em;
+}
+
+.prose-container ul { list-style: disc; }
+.prose-container ol { list-style: decimal; }
+
+.prose-container li {
+  margin: 0.15em 0;
+}
+
+.prose-container blockquote {
+  border-left: 2px solid #2a2a3a;
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  color: #a0a0b0;
+}
+
+.prose-container a {
+  color: #7c6cf0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose-container a:hover {
+  color: #8e7ff7;
+}
+
+.prose-container hr {
+  border: none;
+  border-top: 1px solid #2a2a3a;
+  margin: 0.75em 0;
+}
+
+.prose-container table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 12px;
+  width: 100%;
+}
+
+.prose-container th,
+.prose-container td {
+  border: 1px solid #2a2a3a;
+  padding: 0.3em 0.6em;
+  text-align: left;
+}
+
+.prose-container th {
+  background: var(--c-surface);
+  font-weight: 600;
+}
+
+.prose-container strong { font-weight: 600; }
+.prose-container em { font-style: italic; }
+
+/* Monaco overrides — all layers transparent so parent bg shows through */
+.monaco-editor,
+.monaco-editor .overflow-guard,
+.monaco-editor-background,
+.monaco-editor .margin,
+.monaco-editor .monaco-scrollable-element,
+.monaco-editor .lines-content,
+.monaco-editor .view-lines,
+.monaco-editor .inputarea.ime-input {
+  background-color: transparent !important;
+}

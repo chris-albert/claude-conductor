@@ -1,0 +1,16 @@
+{
+  "name": "claude-conductor",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "turbo dev --filter=@claude-conductor/server --filter=@claude-conductor/web",
+    "dev:desktop": "pnpm --filter @claude-conductor/desktop dev",
+    "build": "turbo build",
+    "dist:desktop": "turbo build --filter=@claude-conductor/server --filter=@claude-conductor/web && pnpm --filter @claude-conductor/desktop dist",
+    "lint": "turbo lint"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0"
+  }
+}

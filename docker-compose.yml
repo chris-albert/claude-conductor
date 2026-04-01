@@ -1,0 +1,25 @@
+services:
+  server:
+    build:
+      context: .
+      target: server
+    restart: unless-stopped
+    environment:
+      - PROJECT_ROOT=/project
+    volumes:
+      - ${PROJECT_PATH:-.}:/project
+      - claude-auth:/home/conductor/.claude
+    expose:
+      - "3001"
+
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "8080:80"
+    depends_on:
+      - server
+
+volumes:
+  claude-auth:
