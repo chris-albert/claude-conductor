@@ -83,9 +83,21 @@ export function SessionPane({
               <p className="text-c-muted text-xs">Send a message to begin.</p>
             </div>
           )}
-          {events.map((event, i) => (
-            <EventBlock key={i} event={event} onRunCommand={onRunCommand} />
-          ))}
+          {events.map((event, i) => {
+            // Skip tool_results that were already consumed by a paired Bash block
+            if (event.type === "tool_result" && i > 0) {
+              const prev = events[i - 1];
+              if (prev.type === "tool_use" && (prev.data as { name: string }).name === "Bash") {
+                return null;
+              }
+            }
+            // Pair Bash tool_use with its following tool_result
+            if (event.type === "tool_use" && (event.data as { name: string }).name === "Bash") {
+              const result = i + 1 < events.length && events[i + 1].type === "tool_result" ? events[i + 1] : null;
+              return <BashBlock key={i} event={event} result={result} />;
+            }
+            return <EventBlock key={i} event={event} onRunCommand={onRunCommand} />;
+          })}
           {isStreaming &&
             events.length > 0 &&
             events[events.length - 1].type !== "user_message" && (
@@ -284,6 +296,40 @@ function fmtTokens(n: number): string {
 
 /** Detect if inline code looks like a runnable command */
 const CMD_PATTERN = /^(npm|pnpm|yarn|bun|npx|node|python|pip|cargo|go|ruby|php|make|docker|tsx|ts-node)\s/;
+
+function BashBlock({ event, result }: { event: StreamEvent; result: StreamEvent | null }) {
+  const data = event.data as { input: { command?: string } };
+  const command = data.input?.command ?? "";
+  const output = result
+    ? typeof result.data === "string"
+      ? result.data
+      : (result.data as { content?: string })?.content ??
+        JSON.stringify(result.data)
+    : null;
+
+  return (
+    <div className="py-0.5 animate-fade-in">
+      <details className="group">
+        <summary className="flex items-center gap-1.5 cursor-pointer select-none text-2xs text-c-text-secondary hover:text-c-text transition-colors">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-c-accent flex-shrink-0">
+            <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+          <span className="font-mono font-medium truncate">{command}</span>
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="transition-transform group-open:rotate-90 flex-shrink-0">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </summary>
+        {output && (
+          <div className="mt-1 ml-4 p-2 bg-c-surface rounded border border-c-border-subtle">
+            <pre className="text-2xs text-c-text-secondary font-mono overflow-x-auto max-h-48 whitespace-pre-wrap leading-relaxed">
+              {output}
+            </pre>
+          </div>
+        )}
+      </details>
+    </div>
+  );
+}
 
 function EventBlock({ event, onRunCommand }: { event: StreamEvent; onRunCommand?: (cmd: string) => void }) {
   if (event.type === "user_message") {
