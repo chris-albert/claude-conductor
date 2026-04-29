@@ -102,29 +102,6 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
-        {/* Project presets from conductor.config.json */}
-        {presets.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1">
-            {presets.map((preset) => (
-              <button
-                key={preset.name}
-                onClick={() => handlePresetClick(preset)}
-                title={[
-                  preset.description,
-                  `$ ${preset.command}`,
-                  preset.slots && preset.slots.length > 0 ? `slots: ${preset.slots.join(", ")}` : null,
-                ].filter(Boolean).join("\n")}
-                className="flex items-center gap-1 px-2 py-0.5 text-2xs font-medium bg-c-surface/40 hover:bg-c-surface border border-c-border-subtle hover:border-c-accent/40 text-c-text-secondary hover:text-c-text rounded transition-colors"
-              >
-                <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" className="text-c-accent">
-                  <polygon points="5 3 19 12 5 21 5 3" />
-                </svg>
-                {preset.name}
-              </button>
-            ))}
-          </div>
-        )}
-
         {/* Command input + optional description / port slots */}
         <div className="space-y-1">
           <div className="flex items-center gap-1.5">
@@ -161,6 +138,32 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
             />
           </div>
         </div>
+
+        {/* Project presets from conductor.config.json */}
+        {presets.length > 0 && (
+          <div>
+            <p className="text-2xs text-c-muted mb-1.5 uppercase tracking-wider">Saved</p>
+            <div className="flex flex-wrap items-center gap-1">
+              {presets.map((preset) => (
+                <button
+                  key={preset.name}
+                  onClick={() => handlePresetClick(preset)}
+                  title={[
+                    preset.description,
+                    `$ ${preset.command}`,
+                    preset.slots && preset.slots.length > 0 ? `slots: ${preset.slots.join(", ")}` : null,
+                  ].filter(Boolean).join("\n")}
+                  className="flex items-center gap-1 px-2 py-0.5 text-2xs font-medium bg-c-surface/40 hover:bg-c-surface border border-c-border-subtle hover:border-c-accent/40 text-c-text-secondary hover:text-c-text rounded transition-colors"
+                >
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" className="text-c-accent">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  {preset.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Conductor-owned processes */}
         {hasRunners && (
