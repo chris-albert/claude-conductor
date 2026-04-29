@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useSessionProcesses, useRunnerState } from "../lib/store";
-import type { SessionProcessState, TrackedCommand, RunnerProcess } from "../lib/types";
+import type { SessionProcessState, TrackedCommand, RunnerProcess, ProcessPreset } from "../lib/types";
 
 interface ProcessPanelProps {
   sessionId: string;
@@ -15,12 +15,37 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
   const [cmdInput, setCmdInput] = useState("");
   const [descInput, setDescInput] = useState("");
   const [slotsInput, setSlotsInput] = useState("");
+  const [presets, setPresets] = useState<ProcessPreset[]>([]);
+
+  // Load presets from <session.cwd>/conductor.config.json; poll for hot-reload
+  useEffect(() => {
+    if (!sessionId) {
+      setPresets([]);
+      return;
+    }
+    const fetchPresets = () => {
+      fetch(`/api/sessions/${sessionId}/presets`)
+        .then((r) => r.json())
+        .then((d: { presets: ProcessPreset[] }) => setPresets(d.presets ?? []))
+        .catch(() => {});
+    };
+    fetchPresets();
+    const t = setInterval(fetchPresets, 5000);
+    return () => clearInterval(t);
+  }, [sessionId]);
 
   const hasProcesses = processState.processes.length > 0;
   const hasRunners = runnerState.processes.length > 0;
   const hasCommands = processState.commands.length > 0;
   const runningRunners = runnerState.processes.filter((p) => p.exitCode === null);
   const totalRunning = processState.processes.length + runningRunners.length;
+
+  const handlePresetClick = (preset: ProcessPreset) => {
+    onRunCommand(preset.command, {
+      description: preset.description,
+      slots: preset.slots && preset.slots.length > 0 ? preset.slots : undefined,
+    });
+  };
 
   const handleRunSubmit = () => {
     const cmd = cmdInput.trim();
@@ -77,6 +102,29 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
+        {/* Project presets from conductor.config.json */}
+        {presets.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1">
+            {presets.map((preset) => (
+              <button
+                key={preset.name}
+                onClick={() => handlePresetClick(preset)}
+                title={[
+                  preset.description,
+                  `$ ${preset.command}`,
+                  preset.slots && preset.slots.length > 0 ? `slots: ${preset.slots.join(", ")}` : null,
+                ].filter(Boolean).join("\n")}
+                className="flex items-center gap-1 px-2 py-0.5 text-2xs font-medium bg-c-surface/40 hover:bg-c-surface border border-c-border-subtle hover:border-c-accent/40 text-c-text-secondary hover:text-c-text rounded transition-colors"
+              >
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" className="text-c-accent">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                {preset.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Command input + optional description / port slots */}
         <div className="space-y-1">
           <div className="flex items-center gap-1.5">

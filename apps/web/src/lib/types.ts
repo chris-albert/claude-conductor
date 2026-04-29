@@ -114,3 +114,10 @@ export interface RunnerProcess {
 export interface RunnerState {
   processes: RunnerProcess[];
 }
+
+export interface ProcessPreset {
+  name: string;
+  description?: string;
+  command: string;
+  slots?: string[];
+}

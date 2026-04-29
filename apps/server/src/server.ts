@@ -7,6 +7,7 @@ import { join } from "path";
 import { setupWebSocket } from "./ws.js";
 import { SessionManager } from "./sessions.js";
 import { listDirectory, readFileContent, writeFileContent, getFileStats } from "./files.js";
+import { loadPresets } from "./presets.js";
 
 export interface ConductorServerOptions {
   projectRoot?: string;
@@ -271,6 +272,16 @@ export function createConductorServer(
   // All runner processes across every session (for the global Process Manager view)
   app.get("/api/runners", (_req, res) => {
     res.json({ processes: runnerManager.listAll() });
+  });
+
+  // Project presets from <session.cwd>/conductor.config.json (re-read each call for hot-reload)
+  app.get("/api/sessions/:id/presets", (req, res) => {
+    const session = sessionManager.get(req.params.id);
+    if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+    res.json({ presets: loadPresets(session.cwd) });
   });
 
   // Serve static web app if a directory is provided (used by Electron / standalone)
