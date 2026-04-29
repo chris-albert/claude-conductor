@@ -55,15 +55,53 @@ export function DetailsPanel({ sessionId }: DetailsPanelProps) {
           </div>
         </Section>
 
+        {/* Repo */}
+        {(details?.remoteUrl || details?.githubUrl) && (
+          <Section label="Repo">
+            <div className="space-y-1.5 text-2xs">
+              {details.githubUrl && (
+                <Row k="github">
+                  <a
+                    href={details.githubUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-c-accent hover:text-c-accent-hover hover:underline break-all"
+                  >
+                    {details.githubUrl}
+                  </a>
+                </Row>
+              )}
+              {details.remoteUrl && details.remoteUrl !== details.githubUrl && (
+                <Row k="origin">
+                  <code className="font-mono text-c-muted break-all">
+                    {details.remoteUrl}
+                  </code>
+                </Row>
+              )}
+            </div>
+          </Section>
+        )}
+
         {/* Git */}
         {details?.isGitRepo && (
           <Section label="Git">
             <div className="space-y-1.5 text-2xs">
               {details.branch && (
                 <Row k="branch">
-                  <span className="font-mono text-c-text-secondary">
-                    {details.branch}
-                  </span>
+                  {details.githubUrl ? (
+                    <a
+                      href={`${details.githubUrl}/tree/${encodeURI(details.branch)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-c-accent hover:text-c-accent-hover hover:underline"
+                    >
+                      {details.branch}
+                    </a>
+                  ) : (
+                    <span className="font-mono text-c-text-secondary">
+                      {details.branch}
+                    </span>
+                  )}
                   {(details.ahead ?? 0) > 0 || (details.behind ?? 0) > 0 ? (
                     <span className="ml-2 text-c-muted font-mono tabular-nums">
                       {details.ahead ? `↑${details.ahead}` : ""}
@@ -88,33 +126,6 @@ export function DetailsPanel({ sessionId }: DetailsPanelProps) {
                       {details.headSubject}
                     </span>
                   )}
-                </Row>
-              )}
-            </div>
-          </Section>
-        )}
-
-        {/* Repo */}
-        {(details?.remoteUrl || details?.githubUrl) && (
-          <Section label="Repo">
-            <div className="space-y-1.5 text-2xs">
-              {details.githubUrl && (
-                <Row k="github">
-                  <a
-                    href={details.githubUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-c-accent hover:text-c-accent-hover hover:underline break-all"
-                  >
-                    {details.githubUrl}
-                  </a>
-                </Row>
-              )}
-              {details.remoteUrl && details.remoteUrl !== details.githubUrl && (
-                <Row k="origin">
-                  <code className="font-mono text-c-muted break-all">
-                    {details.remoteUrl}
-                  </code>
                 </Row>
               )}
             </div>
