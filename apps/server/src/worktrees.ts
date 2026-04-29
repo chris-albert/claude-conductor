@@ -1,8 +1,48 @@
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, rmSync } from "fs";
+import { randomBytes } from "crypto";
 import { join } from "path";
 
 const WORKTREE_DIR = ".conductor/worktrees";
+
+const ADJECTIVES = [
+  "amber", "azure", "bold", "brave", "calm", "clever", "cosmic", "crimson",
+  "crisp", "dapper", "deep", "eager", "ember", "fierce", "frost", "gentle",
+  "golden", "happy", "hidden", "ivory", "jade", "keen", "lively", "lucky",
+  "mellow", "merry", "misty", "mossy", "noble", "nimble", "pearl", "plucky",
+  "proud", "quick", "quiet", "rapid", "ruby", "rustic", "shadow", "silent",
+  "silver", "smooth", "solar", "spry", "stormy", "sunny", "swift", "tidal",
+  "topaz", "twilight", "valiant", "velvet", "vivid", "wild", "witty", "zesty",
+];
+
+const NOUNS = [
+  "badger", "beaver", "bison", "bobcat", "cheetah", "chipmunk", "coyote",
+  "crane", "deer", "dolphin", "eagle", "elk", "falcon", "ferret", "finch",
+  "fox", "gecko", "hawk", "heron", "ibis", "iguana", "jaguar", "koala",
+  "lemur", "leopard", "lynx", "magpie", "marten", "moose", "newt", "ocelot",
+  "orca", "otter", "owl", "panda", "panther", "pelican", "penguin", "puma",
+  "quail", "rabbit", "raccoon", "raven", "robin", "salmon", "seal", "shark",
+  "sloth", "sparrow", "stingray", "stoat", "swan", "tiger", "trout", "turtle",
+  "viper", "walrus", "weasel", "whale", "wolf", "wombat", "yak", "zebra",
+];
+
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+/**
+ * Generate a friendly worktree name (e.g. "swift-otter").
+ * Retries on collision; falls back to appending a short hex suffix if all
+ * retries collide (vanishingly unlikely given ~3500 combinations).
+ */
+export function generateWorktreeName(projectRoot: string): string {
+  const worktreeDir = join(projectRoot, WORKTREE_DIR);
+  for (let i = 0; i < 10; i++) {
+    const candidate = `${pick(ADJECTIVES)}-${pick(NOUNS)}`;
+    if (!existsSync(join(worktreeDir, candidate))) return candidate;
+  }
+  return `${pick(ADJECTIVES)}-${pick(NOUNS)}-${randomBytes(2).toString("hex")}`;
+}
 
 export function ensureWorktreeDir(projectRoot: string): string {
   const dir = join(projectRoot, WORKTREE_DIR);

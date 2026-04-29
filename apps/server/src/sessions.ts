@@ -21,8 +21,12 @@ Instead, when the user asks you to start a server or long-running process:
 
 Short-lived commands (install, build, git, file operations, tests) are fine to run directly.
 `;
-import { join } from "path";
-import { createWorktree, removeWorktree } from "./worktrees.js";
+import { basename, join } from "path";
+import {
+  createWorktree,
+  generateWorktreeName,
+  removeWorktree,
+} from "./worktrees.js";
 import {
   deleteProcessSessionState,
   deleteRunnerSessionState,
@@ -58,7 +62,7 @@ export class SessionManager {
     if (useWorktree) {
       // Create worktree from the chosen directory (which must be a git repo)
       const gitRoot = customCwd || this.projectRoot;
-      worktreePath = createWorktree(gitRoot, id.slice(0, 8));
+      worktreePath = createWorktree(gitRoot, generateWorktreeName(gitRoot));
       cwd = worktreePath;
     }
 
@@ -158,7 +162,7 @@ export class SessionManager {
 
     if (session.worktreePath) {
       try {
-        removeWorktree(this.projectRoot, id.slice(0, 8));
+        removeWorktree(this.projectRoot, basename(session.worktreePath));
       } catch {
         // Best effort cleanup
       }
