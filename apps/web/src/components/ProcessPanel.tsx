@@ -15,6 +15,7 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
   const [cmdInput, setCmdInput] = useState("");
   const [descInput, setDescInput] = useState("");
   const [slotsInput, setSlotsInput] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [presets, setPresets] = useState<ProcessPreset[]>([]);
 
   // Load presets from <session.cwd>/conductor.config.json; poll for hot-reload
@@ -105,6 +106,19 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
         {/* Command input + optional description / port slots */}
         <div className="space-y-1">
           <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setAdvancedOpen((v) => !v)}
+              className="flex-shrink-0 text-c-muted hover:text-c-text-secondary p-1 -m-1"
+              title={advancedOpen ? "Hide description and port slots" : "Add description and port slots"}
+            >
+              <svg
+                width="9" height="9" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" strokeWidth="2"
+                className={`transition-transform ${advancedOpen ? "rotate-90" : ""}`}
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
             <input
               value={cmdInput}
               onChange={(e) => setCmdInput(e.target.value)}
@@ -120,23 +134,25 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
               Run
             </button>
           </div>
-          <div className="flex items-center gap-1.5">
-            <input
-              value={descInput}
-              onChange={(e) => setDescInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleRunSubmit(); }}
-              placeholder="Description (optional)"
-              className="flex-1 bg-transparent border border-c-border-subtle/60 rounded px-2 py-0.5 text-2xs text-c-text-secondary outline-none focus:border-c-accent/40 placeholder:text-c-muted/50"
-            />
-            <input
-              value={slotsInput}
-              onChange={(e) => setSlotsInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleRunSubmit(); }}
-              placeholder="Port slots: WEB, API"
-              title="Comma-separated slot names. Conductor allocates a port for each and injects ${NAME}_PORT env vars. Leave empty to inject just PORT."
-              className="w-44 bg-transparent border border-c-border-subtle/60 rounded px-2 py-0.5 text-2xs font-mono text-c-text-secondary outline-none focus:border-c-accent/40 placeholder:text-c-muted/50"
-            />
-          </div>
+          {advancedOpen && (
+            <div className="flex items-center gap-1.5 pl-4">
+              <input
+                value={descInput}
+                onChange={(e) => setDescInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleRunSubmit(); }}
+                placeholder="Description (optional)"
+                className="flex-1 bg-transparent border border-c-border-subtle/60 rounded px-2 py-0.5 text-2xs text-c-text-secondary outline-none focus:border-c-accent/40 placeholder:text-c-muted/50"
+              />
+              <input
+                value={slotsInput}
+                onChange={(e) => setSlotsInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleRunSubmit(); }}
+                placeholder="Port slots: WEB, API"
+                title="Comma-separated slot names. Conductor allocates a port for each and injects ${NAME}_PORT env vars. Leave empty to inject just PORT."
+                className="w-44 bg-transparent border border-c-border-subtle/60 rounded px-2 py-0.5 text-2xs font-mono text-c-text-secondary outline-none focus:border-c-accent/40 placeholder:text-c-muted/50"
+              />
+            </div>
+          )}
         </div>
 
         {/* Project presets from conductor.config.json */}
