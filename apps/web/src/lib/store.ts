@@ -159,12 +159,14 @@ export function setActiveSession(id: string | null) {
   store.activeSessionId = id;
   emitChange();
 
-  // Load persisted events if this session has no events yet
   if (id) {
     const state = store.sessionStates.get(id);
+    // Load persisted events if this session has no events yet
     if (state && state.events.length === 0) {
       loadSessionEvents(id);
     }
+    // Always fetch live process state from server memory
+    loadProcessState(id);
   }
 }
 
@@ -172,17 +174,38 @@ async function loadSessionEvents(sessionId: string) {
   try {
     const res = await fetch(`/api/sessions/${sessionId}/events`);
     const events = (await res.json()) as StreamEvent[];
-    if (!Array.isArray(events) || events.length === 0) return;
 
     const state = store.sessionStates.get(sessionId);
     if (!state || state.events.length > 0) return; // already has events
 
-    // Replay events into the session state
-    for (const event of events) {
-      addSessionEvent(sessionId, event);
+    if (Array.isArray(events)) {
+      for (const event of events) {
+        addSessionEvent(sessionId, event);
+      }
     }
   } catch {
     // Ignore fetch errors
+  }
+}
+
+async function loadProcessState(sessionId: string) {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/processes`);
+    const processData = await res.json() as {
+      processState?: SessionProcessState;
+      runnerState?: RunnerState;
+    };
+    const current = store.sessionStates.get(sessionId);
+    if (current) {
+      store.sessionStates = new Map(store.sessionStates).set(sessionId, {
+        ...current,
+        processState: processData.processState ?? current.processState,
+        runnerState: processData.runnerState ?? current.runnerState,
+      });
+      emitChange();
+    }
+  } catch {
+    // Process endpoint may not exist on older servers
   }
 }
 

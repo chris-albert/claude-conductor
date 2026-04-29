@@ -159,7 +159,7 @@ export class AgentSession {
   ): AsyncGenerator<SessionEvent> {
     // Create or reuse the persistent session
     if (!this.session) {
-      const model = opts?.model ?? "claude-sonnet-4-6";
+      const model = opts?.model ?? "claude-opus-4-6";
       const resumeId = opts?.sdkSessionId ?? this._sdkSessionId ?? undefined;
       this.session = await this.createSession(model, resumeId);
     }
@@ -190,7 +190,7 @@ ${prompt}`;
     } catch {
       // Session might be stale — recreate
       try { this.session!.close(); } catch { /* */ }
-      const model = opts?.model ?? "claude-sonnet-4-6";
+      const model = opts?.model ?? "claude-opus-4-6";
       this.session = await this.createSession(model);
       await this.session!.send(wrappedPrompt);
     }

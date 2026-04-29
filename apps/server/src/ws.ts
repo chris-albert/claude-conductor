@@ -22,11 +22,17 @@ interface ClientMessage {
   runnerId?: string;
 }
 
+export interface WebSocketContext {
+  wss: InstanceType<typeof WebSocketServer>;
+  processManager: ProcessManager;
+  runnerManager: RunnerManager;
+}
+
 export function setupWebSocket(
   server: HttpServer,
   sessionManager: SessionManager,
   projectRoot: string
-) {
+): WebSocketContext {
   const wss = new WebSocketServer({ server, path: "/ws" });
   const fileWatcher = new FileWatcher();
   const portMonitor = new PortMonitor();
@@ -341,5 +347,5 @@ export function setupWebSocket(
     for (const [, ac] of activeAborts) ac.abort();
   });
 
-  return wss;
+  return { wss, processManager, runnerManager };
 }

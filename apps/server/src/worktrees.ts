@@ -30,8 +30,24 @@ export function createWorktree(projectRoot: string, name: string): string {
     );
   }
 
+  // Fetch latest from origin and determine the main branch
+  let startPoint = "HEAD";
   try {
-    execSync(`git worktree add "${worktreePath}" -b "${branchName}"`, {
+    execSync("git fetch origin", { cwd: projectRoot, stdio: "pipe", timeout: 30_000 });
+    // Try origin/main, then origin/master
+    for (const candidate of ["origin/main", "origin/master"]) {
+      try {
+        execSync(`git rev-parse --verify ${candidate}`, { cwd: projectRoot, stdio: "pipe" });
+        startPoint = candidate;
+        break;
+      } catch { /* try next */ }
+    }
+  } catch {
+    // Fetch failed (offline, no remote) — fall back to HEAD
+  }
+
+  try {
+    execSync(`git worktree add "${worktreePath}" -b "${branchName}" ${startPoint}`, {
       cwd: projectRoot,
       stdio: "pipe",
     });

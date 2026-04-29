@@ -110,10 +110,9 @@ export function EditorPane({ rootPath }: EditorPaneProps) {
 
   return (
     <div className="flex flex-col h-full bg-c-bg">
-      {/* Shared header: Explorer + cwd */}
-      <div className="h-8 flex items-center px-3 border-b border-c-border flex-shrink-0">
-        <span className="text-2xs font-medium text-c-text-secondary uppercase tracking-wider">Explorer</span>
-        <span className="ml-auto text-2xs text-c-muted font-mono truncate max-w-[70%]" title={rootPath}>
+      {/* cwd path bar */}
+      <div className="h-6 flex items-center px-3 border-b border-c-border-subtle flex-shrink-0">
+        <span className="text-2xs text-c-muted font-mono truncate" title={rootPath}>
           {rootPath}
         </span>
       </div>

@@ -256,17 +256,26 @@ export function createConductorServer(
     }
   });
 
+  // Setup WebSocket (must happen before static serving so we can add API routes)
+  const server = createServer(app);
+  const { processManager, runnerManager } = setupWebSocket(server, sessionManager, PROJECT_ROOT);
+
+  // Live process/runner state (in-memory, survives page refresh but not server restart)
+  app.get("/api/sessions/:id/processes", (req, res) => {
+    res.json({
+      processState: processManager.getState(req.params.id),
+      runnerState: runnerManager.getState(req.params.id),
+    });
+  });
+
   // Serve static web app if a directory is provided (used by Electron / standalone)
+  // Must be AFTER all API routes since the catch-all "*" would intercept them
   if (opts.staticDir) {
     app.use(express.static(opts.staticDir));
     app.get("*", (_req, res) => {
       res.sendFile(join(opts.staticDir!, "index.html"));
     });
   }
-
-  // Setup WebSocket
-  const server = createServer(app);
-  setupWebSocket(server, sessionManager, PROJECT_ROOT);
 
   const start = (): Promise<{ port: number }> =>
     new Promise((resolve) => {

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { EditorPane } from "./components/EditorPane";
 import { SessionPane } from "./components/SessionPane";
+import { ProcessPanel } from "./components/ProcessPanel";
+import { BrowserPanel } from "./components/BrowserPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import {
@@ -27,6 +29,7 @@ export default function App() {
   const [projectRoot, setProjectRoot] = useState<string>("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [leftTab, setLeftTab] = useState<"explorer" | "processes" | "browser">("explorer");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [authState, setAuthState] = useState<{
     checked: boolean;
@@ -147,16 +150,25 @@ export default function App() {
     []
   );
 
-  const handleForkSession = useCallback(
-    (sourceSessionId: string, newCwd: string) => {
+  const handleNewWorktree = useCallback(
+    (sourceSessionId: string) => {
+      // Derive the git root from the source session's worktree path
+      // worktreePath is like <gitRoot>/.conductor/worktrees/<name>
+      const source = store.sessions.get(sourceSessionId);
+      if (!source?.worktreePath) return;
+      const gitRoot = source.worktreePath.replace(/\/\.conductor\/worktrees\/[^/]+$/, "");
+
+      const id = crypto.randomUUID();
+      const num = sessions.length + 1;
       send({
-        type: "fork_session",
-        sourceSessionId,
-        sessionId: crypto.randomUUID(),
-        cwd: newCwd,
+        type: "create_session",
+        sessionId: id,
+        name: `Session ${num}`,
+        useWorktree: true,
+        cwd: gitRoot,
       });
     },
-    [send]
+    [send, sessions.length, store.sessions]
   );
 
   const handleSendPrompt = useCallback(
@@ -197,7 +209,7 @@ export default function App() {
       <div className="relative z-10 flex h-full w-full">
 
       {/* Modals */}
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} projectRoot={projectRoot} />
       <NewSessionModal
         open={newSessionOpen}
         projectRoot={projectRoot}
@@ -257,15 +269,72 @@ export default function App() {
         onNewSession={() => setNewSessionOpen(true)}
         onDeleteSession={handleDeleteSession}
         onRenameSession={handleRenameSession}
-        onForkSession={handleForkSession}
+        onNewWorktree={handleNewWorktree}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
       {/* Main content area: split pane */}
       <div className="flex flex-1 min-w-0">
-        {/* Left: Editor + File Tree */}
-        <div className="w-1/2 border-r border-c-border">
-          <EditorPane rootPath={activeSession?.cwd ?? projectRoot} />
+        {/* Left: Tabbed (Explorer / Processes) */}
+        <div className="w-1/2 border-r border-c-border flex flex-col">
+          {/* Tab bar */}
+          <div className="h-7 flex items-center border-b border-c-border flex-shrink-0">
+            <button
+              onClick={() => setLeftTab("explorer")}
+              className={`h-full px-3 text-2xs font-medium uppercase tracking-wider transition-colors border-b-2 ${
+                leftTab === "explorer"
+                  ? "text-c-text-secondary border-c-accent"
+                  : "text-c-muted border-transparent hover:text-c-text-secondary"
+              }`}
+            >
+              Explorer
+            </button>
+            <button
+              onClick={() => setLeftTab("processes")}
+              className={`h-full px-3 text-2xs font-medium uppercase tracking-wider transition-colors border-b-2 ${
+                leftTab === "processes"
+                  ? "text-c-text-secondary border-c-accent"
+                  : "text-c-muted border-transparent hover:text-c-text-secondary"
+              }`}
+            >
+              Processes
+            </button>
+            <button
+              onClick={() => setLeftTab("browser")}
+              className={`h-full px-3 text-2xs font-medium uppercase tracking-wider transition-colors border-b-2 ${
+                leftTab === "browser"
+                  ? "text-c-text-secondary border-c-accent"
+                  : "text-c-muted border-transparent hover:text-c-text-secondary"
+              }`}
+            >
+              Browser
+            </button>
+          </div>
+          {/* Tab content */}
+          <div className="flex-1 min-h-0">
+            {leftTab === "explorer" ? (
+              <EditorPane rootPath={activeSession?.cwd ?? projectRoot} />
+            ) : leftTab === "processes" ? (
+              activeSession ? (
+                <ProcessPanel
+                  sessionId={activeSession.id}
+                  onKillProcess={(pid) => send({ type: "kill_process", pid })}
+                  onRunCommand={(command) => send({ type: "run_command", sessionId: activeSession.id, command })}
+                  onKillRunner={(runnerId) => send({ type: "kill_runner", runnerId })}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full bg-c-bg">
+                  <p className="text-xs text-c-muted">Select a session to view processes</p>
+                </div>
+              )
+            ) : activeSession ? (
+              <BrowserPanel sessionId={activeSession.id} />
+            ) : (
+              <div className="flex items-center justify-center h-full bg-c-bg">
+                <p className="text-xs text-c-muted">Select a session to view browser</p>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right: Session stream */}
@@ -274,9 +343,7 @@ export default function App() {
             <SessionPane
               sessionId={activeSession.id}
               onSendPrompt={handleSendPrompt}
-              onKillProcess={(pid) => send({ type: "kill_process", pid })}
               onRunCommand={(command) => send({ type: "run_command", sessionId: activeSession.id, command })}
-              onKillRunner={(runnerId) => send({ type: "kill_runner", runnerId })}
               isStreaming={activeSession.status === "streaming"}
             />
           ) : (

@@ -1,6 +1,13 @@
 import { useSyncExternalStore } from "react";
 
+export type Verbosity = "low" | "med" | "high";
+
 export interface Settings {
+  // General
+  defaultModel: string;
+  defaultSessionFolder: string;
+  defaultVerbosity: Verbosity;
+  // Theme
   editorFontSize: number;
   backgroundColor: string;
   backgroundImage: string;
@@ -10,6 +17,9 @@ export interface Settings {
 const STORAGE_KEY = "conductor-settings";
 
 const defaults: Settings = {
+  defaultModel: "claude-opus-4-6",
+  defaultSessionFolder: "",
+  defaultVerbosity: "med",
   editorFontSize: 12,
   backgroundColor: "#0f0f14",
   backgroundImage: "",
