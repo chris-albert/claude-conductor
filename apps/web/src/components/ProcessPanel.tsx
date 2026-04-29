@@ -121,7 +121,15 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
             <p className="text-2xs text-c-muted mb-1.5 uppercase tracking-wider">Conductor</p>
             <div className="space-y-1.5">
               {runnerState.processes.map((proc) => (
-                <RunnerProcessRow key={proc.id} proc={proc} onKill={() => onKillRunner(proc.id)} onRerun={() => onRunCommand(proc.command)} />
+                <RunnerProcessRow
+                  key={proc.id}
+                  proc={proc}
+                  onKill={() => onKillRunner(proc.id)}
+                  onRerun={() => onRunCommand(proc.command, {
+                    description: proc.description,
+                    slots: proc.slots.length > 0 ? proc.slots.map((s) => s.name) : undefined,
+                  })}
+                />
               ))}
             </div>
           </div>
