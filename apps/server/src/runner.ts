@@ -1,5 +1,10 @@
 import { spawn, execFile, execSync, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
+import {
+  listPersistedRunnerSessions,
+  loadRunnerSessionState,
+  saveRunnerSessionState,
+} from "./persistence.js";
 
 export interface RunnerProcess {
   id: string;
@@ -122,6 +127,14 @@ export class RunnerManager extends EventEmitter {
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private portScanTimer: ReturnType<typeof setInterval> | null = null;
   private model = "claude-opus-4-6";
+  private projectRoot?: string;
+  private persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  constructor(projectRoot?: string) {
+    super();
+    this.projectRoot = projectRoot;
+    if (projectRoot) this.rehydrateFromDisk(projectRoot);
+  }
 
   setModel(model: string) {
     this.model = model;
@@ -562,9 +575,49 @@ export class RunnerManager extends EventEmitter {
   }
 
   private emitChange(sessionId: string) {
+    this.schedulePersist(sessionId);
     this.emit("change", {
       sessionId,
       state: this.getState(sessionId),
     });
+  }
+
+  private rehydrateFromDisk(projectRoot: string) {
+    for (const sessionId of listPersistedRunnerSessions(projectRoot)) {
+      const persisted = loadRunnerSessionState(projectRoot, sessionId);
+      if (!persisted) continue;
+      for (const proc of persisted.processes) {
+        if (proc.exitCode === null) {
+          proc.exitCode = 130;
+          proc.output =
+            (proc.output ?? "") +
+            "\n━━ Process terminated due to server restart ━━\n";
+        }
+        this.processes.set(proc.id, proc);
+        if (!this.sessionProcesses.has(proc.sessionId)) {
+          this.sessionProcesses.set(proc.sessionId, new Set());
+        }
+        this.sessionProcesses.get(proc.sessionId)!.add(proc.id);
+      }
+    }
+  }
+
+  private schedulePersist(sessionId: string) {
+    if (!this.projectRoot) return;
+    if (this.persistTimers.has(sessionId)) return;
+    this.persistTimers.set(
+      sessionId,
+      setTimeout(() => {
+        this.persistTimers.delete(sessionId);
+        this.persistNow(sessionId);
+      }, 500)
+    );
+  }
+
+  private persistNow(sessionId: string) {
+    if (!this.projectRoot) return;
+    try {
+      saveRunnerSessionState(this.projectRoot, sessionId, this.getState(sessionId));
+    } catch { /* best effort */ }
   }
 }

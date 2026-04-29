@@ -23,6 +23,10 @@ Short-lived commands (install, build, git, file operations, tests) are fine to r
 `;
 import { join } from "path";
 import { createWorktree, removeWorktree } from "./worktrees.js";
+import {
+  deleteProcessSessionState,
+  deleteRunnerSessionState,
+} from "./persistence.js";
 
 export interface Session {
   id: string;
@@ -167,6 +171,10 @@ export class SessionManager {
     } catch {
       // Best effort
     }
+
+    // Clean up persisted process/runner history
+    deleteProcessSessionState(this.projectRoot, id);
+    deleteRunnerSessionState(this.projectRoot, id);
 
     this.sessions.delete(id);
     this.save();

@@ -1,6 +1,11 @@
 import { execFile, spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { existsSync, readlinkSync } from "fs";
+import {
+  isPidAlive,
+  loadProcessSessionState,
+  saveProcessSessionState,
+} from "./persistence.js";
 
 export interface ProcessInfo {
   pid: number;
@@ -59,15 +64,21 @@ export class ProcessManager extends EventEmitter {
   private scanIntervalMs: number;
   /** PIDs to exclude from scans (managed by RunnerManager) */
   public excludePids = new Set<number>();
+  /** Project root for persistence (optional) */
+  private projectRoot?: string;
+  /** Debounce timers for disk writes per session */
+  private persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(scanIntervalMs = 5000) {
+  constructor(scanIntervalMs = 5000, projectRoot?: string) {
     super();
     this.scanIntervalMs = scanIntervalMs;
+    this.projectRoot = projectRoot;
   }
 
   trackSession(sessionId: string) {
     if (!this.sessions.has(sessionId)) {
-      this.sessions.set(sessionId, { commands: [], processes: [] });
+      const restored = this.loadFromDisk(sessionId);
+      this.sessions.set(sessionId, restored ?? { commands: [], processes: [] });
     }
     this.startScanning();
   }
@@ -148,6 +159,10 @@ export class ProcessManager extends EventEmitter {
   }
 
   getState(sessionId: string): SessionProcessState {
+    if (!this.sessions.has(sessionId)) {
+      const restored = this.loadFromDisk(sessionId);
+      if (restored) this.sessions.set(sessionId, restored);
+    }
     return this.sessions.get(sessionId) ?? { commands: [], processes: [] };
   }
 
@@ -504,9 +519,67 @@ export class ProcessManager extends EventEmitter {
       return cmd;
     });
 
+    // Persist enriched commands so output survives restart
+    state.commands = enrichedCommands;
+    this.schedulePersist(sessionId);
+
     this.emit("change", {
       sessionId,
       state: { ...state, commands: enrichedCommands },
     });
+  }
+
+  private loadFromDisk(sessionId: string): SessionProcessState | null {
+    if (!this.projectRoot) return null;
+    const persisted = loadProcessSessionState(this.projectRoot, sessionId);
+    if (!persisted) return null;
+
+    // Restore PID associations only for processes that are still alive.
+    // Dead PIDs drop off; their commands stay in history.
+    for (const [pid, sid] of persisted.pidToSession) {
+      if (sid === sessionId && isPidAlive(pid)) {
+        this.pidToSession.set(pid, sid);
+        this.baselinePids.add(pid);
+      }
+    }
+    for (const [pid, toolUseId] of persisted.pidToToolUseId) {
+      if (this.pidToSession.has(pid)) {
+        this.pidToToolUseId.set(pid, toolUseId);
+      }
+    }
+    return { commands: persisted.commands, processes: [] };
+  }
+
+  private schedulePersist(sessionId: string) {
+    if (!this.projectRoot) return;
+    if (this.persistTimers.has(sessionId)) return;
+    this.persistTimers.set(
+      sessionId,
+      setTimeout(() => {
+        this.persistTimers.delete(sessionId);
+        this.persistNow(sessionId);
+      }, 500)
+    );
+  }
+
+  private persistNow(sessionId: string) {
+    if (!this.projectRoot) return;
+    const state = this.sessions.get(sessionId);
+    if (!state) return;
+    const pidToSession: [number, string][] = [];
+    const pidToToolUseId: [number, string][] = [];
+    for (const [pid, sid] of this.pidToSession) {
+      if (sid !== sessionId) continue;
+      pidToSession.push([pid, sid]);
+      const tuid = this.pidToToolUseId.get(pid);
+      if (tuid) pidToToolUseId.push([pid, tuid]);
+    }
+    try {
+      saveProcessSessionState(this.projectRoot, sessionId, {
+        commands: state.commands,
+        pidToSession,
+        pidToToolUseId,
+      });
+    } catch { /* best effort */ }
   }
 }

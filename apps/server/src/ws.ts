@@ -36,8 +36,8 @@ export function setupWebSocket(
   const wss = new WebSocketServer({ server, path: "/ws" });
   const fileWatcher = new FileWatcher();
   const portMonitor = new PortMonitor();
-  const processManager = new ProcessManager();
-  const runnerManager = new RunnerManager();
+  const processManager = new ProcessManager(5000, projectRoot);
+  const runnerManager = new RunnerManager(projectRoot);
 
   // Persistent agent sessions — Claude Code process stays alive between prompts
   const agentSessions = new Map<string, AgentSession>();
