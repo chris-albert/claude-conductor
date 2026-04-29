@@ -23,7 +23,7 @@ export async function listDirectory(dirPath: string): Promise<FileEntry[]> {
   const results: FileEntry[] = [];
 
   for (const entry of entries) {
-    if (IGNORED.has(entry.name) || entry.name.startsWith(".")) continue;
+    if (IGNORED.has(entry.name)) continue;
     results.push({
       name: entry.name,
       path: join(dirPath, entry.name),
@@ -128,5 +128,5 @@ export class FileWatcher extends EventEmitter {
 
 function shouldIgnoreFile(filename: string): boolean {
   const parts = filename.split("/");
-  return parts.some((p) => IGNORED.has(p) || p.startsWith("."));
+  return parts.some((p) => IGNORED.has(p));
 }
