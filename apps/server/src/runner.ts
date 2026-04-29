@@ -353,10 +353,15 @@ export class RunnerManager extends EventEmitter {
       return;
     }
 
-    // Process exited — it failed
+    // Process exited
     proc.exitCode = exitCode;
     this.children.delete(id);
     this.emitChange(sessionId);
+
+    if (exitCode === 0) {
+      this.appendOutput(id, `\n━━ Completed successfully. ━━\n`);
+      return;
+    }
 
     if (attempt >= MAX_AUTO_FIX_RETRIES) {
       this.appendOutput(id, `\n━━ Failed after ${MAX_AUTO_FIX_RETRIES} attempts. ━━\n`);
