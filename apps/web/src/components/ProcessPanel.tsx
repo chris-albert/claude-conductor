@@ -169,7 +169,7 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
 }
 
 function RunnerProcessRow({ proc, onKill, onRerun }: { proc: RunnerProcess; onKill: () => void; onRerun: () => void }) {
-  const [showOutput, setShowOutput] = useState(true);
+  const [showOutput, setShowOutput] = useState(false);
   const outputRef = useRef<HTMLPreElement>(null);
   const isRunning = proc.exitCode === null;
 
