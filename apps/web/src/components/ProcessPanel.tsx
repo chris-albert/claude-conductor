@@ -5,7 +5,7 @@ import type { SessionProcessState, TrackedCommand, RunnerProcess } from "../lib/
 interface ProcessPanelProps {
   sessionId: string;
   onKillProcess: (pid: number) => void;
-  onRunCommand: (command: string) => void;
+  onRunCommand: (command: string, opts?: { description?: string; slots?: string[] }) => void;
   onKillRunner: (runnerId: string) => void;
 }
 
@@ -13,6 +13,8 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
   const processState = useSessionProcesses(sessionId);
   const runnerState = useRunnerState(sessionId);
   const [cmdInput, setCmdInput] = useState("");
+  const [descInput, setDescInput] = useState("");
+  const [slotsInput, setSlotsInput] = useState("");
 
   const hasProcesses = processState.processes.length > 0;
   const hasRunners = runnerState.processes.length > 0;
@@ -23,8 +25,17 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
   const handleRunSubmit = () => {
     const cmd = cmdInput.trim();
     if (!cmd) return;
-    onRunCommand(cmd);
+    const slots = slotsInput
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    onRunCommand(cmd, {
+      description: descInput.trim() || undefined,
+      slots: slots.length > 0 ? slots : undefined,
+    });
     setCmdInput("");
+    setDescInput("");
+    setSlotsInput("");
   };
 
   return (
@@ -39,43 +50,69 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
         )}
         {(hasRunners || hasProcesses) && (
           <span className="ml-auto flex items-center gap-1.5 font-mono tabular-nums text-2xs">
-            {[
-              ...runnerState.processes.filter((p) => p.exitCode === null).flatMap((p) => p.ports),
-              ...processState.processes.flatMap((p) => p.ports),
-            ].map((port) => (
-              <a
-                key={port}
-                href={`http://localhost:${port}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-c-accent hover:text-c-accent-hover hover:underline"
-              >
-                :{port}
-              </a>
-            ))}
+            {(() => {
+              // Prefer named slot ports for runners; fall back to detected ports for Claude-spawned procs
+              const runnerSlotPorts = runnerState.processes
+                .filter((p) => p.exitCode === null)
+                .flatMap((p) => p.slots.map((s) => s.port));
+              const claudePorts = processState.processes.flatMap((p) => p.ports);
+              const seen = new Set<number>();
+              return [...runnerSlotPorts, ...claudePorts]
+                .filter((p) => (seen.has(p) ? false : (seen.add(p), true)))
+                .map((port) => (
+                  <a
+                    key={port}
+                    href={`http://localhost:${port}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-c-accent hover:text-c-accent-hover hover:underline"
+                  >
+                    :{port}
+                  </a>
+                ));
+            })()}
           </span>
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
-        {/* Command input */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-c-muted text-2xs">$</span>
-          <input
-            value={cmdInput}
-            onChange={(e) => setCmdInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleRunSubmit(); }}
-            placeholder="Run a command..."
-            className="flex-1 bg-transparent border border-c-border-subtle rounded px-2 py-1 text-2xs font-mono text-c-text outline-none focus:border-c-accent/40 placeholder:text-c-muted/50"
-          />
-          <button
-            onClick={handleRunSubmit}
-            disabled={!cmdInput.trim()}
-            className="px-2 py-1 text-2xs font-medium bg-c-accent hover:bg-c-accent-hover disabled:opacity-30 text-white rounded transition-colors"
-          >
-            Run
-          </button>
+        {/* Command input + optional description / port slots */}
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <span className="text-c-muted text-2xs">$</span>
+            <input
+              value={cmdInput}
+              onChange={(e) => setCmdInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleRunSubmit(); }}
+              placeholder="Run a command..."
+              className="flex-1 bg-transparent border border-c-border-subtle rounded px-2 py-1 text-2xs font-mono text-c-text outline-none focus:border-c-accent/40 placeholder:text-c-muted/50"
+            />
+            <button
+              onClick={handleRunSubmit}
+              disabled={!cmdInput.trim()}
+              className="px-2 py-1 text-2xs font-medium bg-c-accent hover:bg-c-accent-hover disabled:opacity-30 text-white rounded transition-colors"
+            >
+              Run
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5 pl-3">
+            <input
+              value={descInput}
+              onChange={(e) => setDescInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleRunSubmit(); }}
+              placeholder="Description (optional)"
+              className="flex-1 bg-transparent border border-c-border-subtle/60 rounded px-2 py-0.5 text-2xs text-c-text-secondary outline-none focus:border-c-accent/40 placeholder:text-c-muted/50"
+            />
+            <input
+              value={slotsInput}
+              onChange={(e) => setSlotsInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleRunSubmit(); }}
+              placeholder="Port slots: WEB, API"
+              title="Comma-separated slot names. Conductor allocates a port for each and injects ${NAME}_PORT env vars. Leave empty to inject just PORT."
+              className="w-44 bg-transparent border border-c-border-subtle/60 rounded px-2 py-0.5 text-2xs font-mono text-c-text-secondary outline-none focus:border-c-accent/40 placeholder:text-c-muted/50"
+            />
+          </div>
         </div>
 
         {/* Conductor-owned processes */}
@@ -143,6 +180,12 @@ function RunnerProcessRow({ proc, onKill, onRerun }: { proc: RunnerProcess; onKi
     }
   }, [proc.output, showOutput]);
 
+  // Show only "extra" detected ports — i.e. lsof-scanned ports that aren't already
+  // surfaced via a named slot. This filters out worker IPC and ephemeral noise once
+  // the user is using slots, but still surfaces unexpected listeners for debugging.
+  const slotPortSet = new Set(proc.slots.map((s) => s.port));
+  const otherPorts = proc.ports.filter((p) => !slotPortSet.has(p));
+
   return (
     <div className="bg-c-surface/30 rounded border border-c-border-subtle overflow-hidden">
       {/* Header */}
@@ -170,23 +213,31 @@ function RunnerProcessRow({ proc, onKill, onRerun }: { proc: RunnerProcess; onKi
         {/* PID */}
         <span className="font-mono tabular-nums text-c-muted w-12 flex-shrink-0">{proc.pid}</span>
 
-        {/* Command */}
-        <span className="font-mono text-c-text-secondary truncate flex-1 min-w-0" title={proc.command}>
-          {proc.command}
+        {/* Description (if set) or command */}
+        <span className="text-c-text-secondary truncate flex-1 min-w-0" title={proc.description || proc.command}>
+          {proc.description ? (
+            <span>
+              {proc.description}{" "}
+              <span className="text-c-muted/70 font-mono">— {proc.command}</span>
+            </span>
+          ) : (
+            <span className="font-mono">{proc.command}</span>
+          )}
         </span>
 
-        {/* Ports */}
-        {proc.ports.length > 0 && (
-          <span className="font-mono tabular-nums flex-shrink-0">
-            {proc.ports.map((port) => (
+        {/* Named slot ports (headline) */}
+        {proc.slots.length > 0 && (
+          <span className="font-mono tabular-nums flex-shrink-0 flex items-center gap-1">
+            {proc.slots.map((slot) => (
               <a
-                key={port}
-                href={`http://localhost:${port}`}
+                key={slot.name}
+                href={`http://localhost:${slot.port}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-c-accent hover:text-c-accent-hover hover:underline mr-1"
+                className="text-c-accent hover:text-c-accent-hover hover:underline"
+                title={`${slot.name}_PORT=${slot.port}`}
               >
-                :{port}
+                {slot.name === "PORT" ? `:${slot.port}` : `${slot.name.toLowerCase()}:${slot.port}`}
               </a>
             ))}
           </span>
@@ -227,6 +278,11 @@ function RunnerProcessRow({ proc, onKill, onRerun }: { proc: RunnerProcess; onKi
         )}
       </div>
 
+      {/* Other detected ports (lsof scan, minus slot ports) — only if any */}
+      {isRunning && otherPorts.length > 0 && (
+        <OtherPorts ports={otherPorts} />
+      )}
+
       {/* Live output */}
       {showOutput && proc.output && (
         <pre
@@ -235,6 +291,26 @@ function RunnerProcessRow({ proc, onKill, onRerun }: { proc: RunnerProcess; onKi
         >
           {proc.output}
         </pre>
+      )}
+    </div>
+  );
+}
+
+function OtherPorts({ ports }: { ports: number[] }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="px-2 pb-1 -mt-0.5">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="text-2xs text-c-muted/70 hover:text-c-muted font-mono"
+        title="Other ports detected via lsof scan (likely worker IPC or ephemeral)"
+      >
+        {expanded ? "−" : "+"} {ports.length} other detected
+      </button>
+      {expanded && (
+        <span className="ml-2 font-mono tabular-nums text-2xs text-c-muted/70">
+          {ports.map((p) => `:${p}`).join(" ")}
+        </span>
       )}
     </div>
   );

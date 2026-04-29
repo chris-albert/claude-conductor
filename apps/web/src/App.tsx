@@ -6,6 +6,7 @@ import { ProcessPanel } from "./components/ProcessPanel";
 import { BrowserPanel } from "./components/BrowserPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
+import { ProcessManagerModal } from "./components/ProcessManagerModal";
 import {
   useStore,
   useSessions,
@@ -29,6 +30,7 @@ export default function App() {
   const [projectRoot, setProjectRoot] = useState<string>("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [processManagerOpen, setProcessManagerOpen] = useState(false);
   const [leftTab, setLeftTab] = useState<"explorer" | "processes" | "browser">("explorer");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [authState, setAuthState] = useState<{
@@ -217,6 +219,12 @@ export default function App() {
         onClose={() => setNewSessionOpen(false)}
         onCreate={handleNewSession}
       />
+      <ProcessManagerModal
+        open={processManagerOpen}
+        sessions={sessions}
+        onClose={() => setProcessManagerOpen(false)}
+        onKillRunner={(runnerId) => send({ type: "kill_runner", runnerId })}
+      />
 
       {/* Auth modal */}
       {authState.checked && !authState.authenticated && (
@@ -271,6 +279,7 @@ export default function App() {
         onRenameSession={handleRenameSession}
         onNewWorktree={handleNewWorktree}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenProcessManager={() => setProcessManagerOpen(true)}
       />
 
       {/* Main content area: split pane */}
@@ -319,7 +328,7 @@ export default function App() {
                 <ProcessPanel
                   sessionId={activeSession.id}
                   onKillProcess={(pid) => send({ type: "kill_process", pid })}
-                  onRunCommand={(command) => send({ type: "run_command", sessionId: activeSession.id, command })}
+                  onRunCommand={(command, opts) => send({ type: "run_command", sessionId: activeSession.id, command, ...opts })}
                   onKillRunner={(runnerId) => send({ type: "kill_runner", runnerId })}
                 />
               ) : (
@@ -343,7 +352,7 @@ export default function App() {
             <SessionPane
               sessionId={activeSession.id}
               onSendPrompt={handleSendPrompt}
-              onRunCommand={(command) => send({ type: "run_command", sessionId: activeSession.id, command })}
+              onRunCommand={(command, opts) => send({ type: "run_command", sessionId: activeSession.id, command, ...opts })}
               isStreaming={activeSession.status === "streaming"}
             />
           ) : (

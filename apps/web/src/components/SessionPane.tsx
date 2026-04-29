@@ -22,7 +22,7 @@ const PERMISSION_MODES = [
 interface SessionPaneProps {
   sessionId: string;
   onSendPrompt: (sessionId: string, prompt: string, model?: string, permissionMode?: string) => void;
-  onRunCommand?: (command: string) => void;
+  onRunCommand?: (command: string, opts?: { description?: string; slots?: string[] }) => void;
   isStreaming: boolean;
 }
 
@@ -297,7 +297,7 @@ const EventList = memo(function EventList({
 }: {
   events: StreamEvent[];
   verbosity: Verbosity;
-  onRunCommand?: (cmd: string) => void;
+  onRunCommand?: (cmd: string, opts?: { description?: string; slots?: string[] }) => void;
 }) {
   const [showAll, setShowAll] = useState(false);
 

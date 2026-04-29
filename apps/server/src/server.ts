@@ -268,6 +268,11 @@ export function createConductorServer(
     });
   });
 
+  // All runner processes across every session (for the global Process Manager view)
+  app.get("/api/runners", (_req, res) => {
+    res.json({ processes: runnerManager.listAll() });
+  });
+
   // Serve static web app if a directory is provided (used by Electron / standalone)
   // Must be AFTER all API routes since the catch-all "*" would intercept them
   if (opts.staticDir) {

@@ -20,6 +20,8 @@ interface ClientMessage {
   pid?: number;
   command?: string;
   runnerId?: string;
+  description?: string;
+  slots?: string[];
 }
 
 export interface WebSocketContext {
@@ -300,7 +302,10 @@ export function setupWebSocket(
           return;
         }
         const cwd = msg.cwd || session.cwd;
-        const proc = runnerManager.smartSpawn(msg.sessionId, msg.command, cwd);
+        const proc = runnerManager.smartSpawn(msg.sessionId, msg.command, cwd, {
+          description: msg.description,
+          slots: msg.slots,
+        });
         ws.send(JSON.stringify({ type: "runner_spawned", sessionId: msg.sessionId, data: proc }));
         return;
       }

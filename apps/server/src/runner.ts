@@ -1,25 +1,71 @@
 import { spawn, execFile, execSync, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
+import { createServer } from "net";
 import {
   listPersistedRunnerSessions,
   loadRunnerSessionState,
   saveRunnerSessionState,
 } from "./persistence.js";
 
+export interface PortSlot {
+  /** Slot name (uppercase env var prefix, e.g. "WEB" → WEB_PORT). "PORT" for the unnamed default. */
+  name: string;
+  port: number;
+}
+
 export interface RunnerProcess {
   id: string;
   pid: number;
   sessionId: string;
   command: string;
+  description?: string;
   cwd: string;
   startedAt: string;
+  /** Ports detected via lsof scan (includes ephemeral/IPC noise). */
   ports: number[];
+  /** Ports conductor allocated for this process and injected as env vars. */
+  slots: PortSlot[];
   output: string;
   exitCode: number | null;
 }
 
 export interface RunnerState {
   processes: RunnerProcess[];
+}
+
+export interface SpawnOptions {
+  description?: string;
+  /** Named port slots, e.g. ["WEB", "API"]. Empty → conductor injects PORT only. */
+  slots?: string[];
+}
+
+function normalizeSlotName(name: string): string {
+  return name.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+}
+
+/** Ask the OS for a free TCP port. Releases the listener immediately. */
+function allocatePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.unref();
+    srv.once("error", reject);
+    srv.listen(0, () => {
+      const addr = srv.address();
+      if (!addr || typeof addr === "string") {
+        srv.close();
+        reject(new Error("Failed to allocate port"));
+        return;
+      }
+      const port = addr.port;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+async function allocatePorts(count: number): Promise<number[]> {
+  const ports: number[] = [];
+  for (let i = 0; i < count; i++) ports.push(await allocatePort());
+  return ports;
 }
 
 const MAX_AUTO_FIX_RETRIES = 5;
@@ -145,7 +191,12 @@ export class RunnerManager extends EventEmitter {
    * If the command fails, asks Claude to diagnose, applies the fix, and retries.
    * Continues until the process stays running or max retries exhausted.
    */
-  smartSpawn(sessionId: string, command: string, cwd: string): RunnerProcess {
+  smartSpawn(
+    sessionId: string,
+    command: string,
+    cwd: string,
+    opts: SpawnOptions = {}
+  ): RunnerProcess {
     // Create the process record first so UI shows immediately
     const id = crypto.randomUUID();
     const proc: RunnerProcess = {
@@ -153,9 +204,11 @@ export class RunnerManager extends EventEmitter {
       pid: 0,
       sessionId,
       command,
+      description: opts.description,
       cwd,
       startedAt: new Date().toISOString(),
       ports: [],
+      slots: [],
       output: "",
       exitCode: null,
     };
@@ -167,11 +220,47 @@ export class RunnerManager extends EventEmitter {
     this.sessionProcesses.get(sessionId)!.add(id);
     this.emitChange(sessionId);
 
-    // Start the auto-fix loop in the background
-    this.autoFixLoop(id, sessionId, command, cwd, 0);
+    // Allocate ports, then start the auto-fix loop
+    void this.allocateAndStart(id, sessionId, command, cwd, opts.slots ?? []);
     this.startPortScanning();
 
     return proc;
+  }
+
+  private async allocateAndStart(
+    id: string,
+    sessionId: string,
+    command: string,
+    cwd: string,
+    slotNames: string[],
+  ) {
+    const proc = this.processes.get(id);
+    if (!proc) return;
+
+    const envAdditions: Record<string, string> = {};
+    try {
+      if (slotNames.length === 0) {
+        // Default: inject a single PORT for the common case
+        const port = await allocatePort();
+        envAdditions.PORT = String(port);
+        proc.slots = [{ name: "PORT", port }];
+      } else {
+        const ports = await allocatePorts(slotNames.length);
+        const slots: PortSlot[] = [];
+        for (let i = 0; i < slotNames.length; i++) {
+          const name = normalizeSlotName(slotNames[i]);
+          const envKey = name === "PORT" ? "PORT" : `${name}_PORT`;
+          envAdditions[envKey] = String(ports[i]);
+          slots.push({ name, port: ports[i] });
+        }
+        proc.slots = slots;
+      }
+    } catch {
+      // Allocation failed — proceed without env injection
+    }
+    this.emitChange(sessionId);
+
+    this.autoFixLoop(id, sessionId, command, cwd, 0, envAdditions);
   }
 
   /**
@@ -219,6 +308,13 @@ export class RunnerManager extends EventEmitter {
       }
     }
     return false;
+  }
+
+  /** All runner processes across all sessions, newest first. */
+  listAll(): RunnerProcess[] {
+    return Array.from(this.processes.values()).sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    );
   }
 
   getState(sessionId: string): RunnerState {
@@ -283,6 +379,7 @@ export class RunnerManager extends EventEmitter {
     command: string,
     cwd: string,
     attempt: number,
+    envAdditions: Record<string, string> = {},
   ) {
     const proc = this.processes.get(id);
     if (!proc) return;
@@ -293,12 +390,13 @@ export class RunnerManager extends EventEmitter {
       this.appendOutput(id, `━━ Running: ${command} ━━\n`);
     }
 
-    // Spawn the actual process
+    // Spawn the actual process with allocated port env vars merged in
     const child = spawn(command, {
       shell: true,
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
+      env: { ...process.env, ...envAdditions },
     });
 
     proc.pid = child.pid ?? 0;
@@ -393,7 +491,7 @@ export class RunnerManager extends EventEmitter {
 
     // Retry the original command (even if fix failed — Claude might suggest something different next time)
     proc.exitCode = null;
-    await this.autoFixLoop(id, sessionId, command, cwd, attempt + 1);
+    await this.autoFixLoop(id, sessionId, command, cwd, attempt + 1, envAdditions);
   }
 
   private rawSpawn(sessionId: string, command: string, cwd: string): RunnerProcess {
@@ -413,6 +511,7 @@ export class RunnerManager extends EventEmitter {
       cwd,
       startedAt: new Date().toISOString(),
       ports: [],
+      slots: [],
       output: "",
       exitCode: null,
     };
@@ -592,6 +691,8 @@ export class RunnerManager extends EventEmitter {
       const persisted = loadRunnerSessionState(projectRoot, sessionId);
       if (!persisted) continue;
       for (const proc of persisted.processes) {
+        // Default new fields for older persisted data
+        proc.slots = proc.slots ?? [];
         if (proc.exitCode === null) {
           proc.exitCode = 130;
           proc.output =

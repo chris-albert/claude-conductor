@@ -90,14 +90,23 @@ export interface SessionProcessState {
   processes: ProcessInfo[];
 }
 
+export interface PortSlot {
+  name: string;
+  port: number;
+}
+
 export interface RunnerProcess {
   id: string;
   pid: number;
   sessionId: string;
   command: string;
+  description?: string;
   cwd: string;
   startedAt: string;
+  /** Ports detected via lsof scan (includes ephemeral/IPC noise). */
   ports: number[];
+  /** Ports conductor allocated and injected as env vars (PORT, WEB_PORT, etc). */
+  slots: PortSlot[];
   output: string;
   exitCode: number | null;
 }
