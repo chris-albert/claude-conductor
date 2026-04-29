@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { DirTypeahead } from "./DirTypeahead";
+import { useSettings } from "../lib/settings";
 
 interface NewSessionModalProps {
   open: boolean;
@@ -16,6 +17,7 @@ export function NewSessionModal({
   onClose,
   onCreate,
 }: NewSessionModalProps) {
+  const settings = useSettings();
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState(projectRoot);
   const [isGitRepo, setIsGitRepo] = useState(false);
@@ -29,12 +31,13 @@ export function NewSessionModal({
   useEffect(() => {
     if (open) {
       setName(`Session ${sessionCount + 1}`);
-      setCwd(projectRoot);
+      const defaultCwd = settings.defaultSessionFolder || projectRoot;
+      setCwd(defaultCwd);
       setUseWorktree(true);
-      checkGitRepo(projectRoot);
+      checkGitRepo(defaultCwd);
       setTimeout(() => nameRef.current?.select(), 50);
     }
-  }, [open, projectRoot, sessionCount]);
+  }, [open, projectRoot, sessionCount, settings.defaultSessionFolder]);
 
   const checkGitRepo = useCallback((path: string) => {
     clearTimeout(debounceRef.current);

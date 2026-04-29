@@ -1,13 +1,12 @@
-import { useState, useRef, useEffect, type FormEvent } from "react";
+import { useState, useRef, useEffect, useMemo, memo, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessionState, useSessionPorts } from "../lib/store";
-import { SubagentPanel } from "./SubagentPanel";
-import { ProcessPanel } from "./ProcessPanel";
+import { useSettings } from "../lib/settings";
 import type { StreamEvent, UsageData, SessionInfo, PortInfo } from "../lib/types";
+import type { Verbosity } from "../lib/settings";
 
 const MODELS = [
-  { id: "", label: "Default" },
   { id: "claude-opus-4-6", label: "Opus 4.6" },
   { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
@@ -23,25 +22,23 @@ const PERMISSION_MODES = [
 interface SessionPaneProps {
   sessionId: string;
   onSendPrompt: (sessionId: string, prompt: string, model?: string, permissionMode?: string) => void;
-  onKillProcess: (pid: number) => void;
-  onRunCommand: (command: string) => void;
-  onKillRunner: (runnerId: string) => void;
+  onRunCommand?: (command: string) => void;
   isStreaming: boolean;
 }
 
 export function SessionPane({
   sessionId,
   onSendPrompt,
-  onKillProcess,
   onRunCommand,
-  onKillRunner,
   isStreaming,
 }: SessionPaneProps) {
+  const settings = useSettings();
   const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("");
+  const [model, setModel] = useState(settings.defaultModel);
   const [permissionMode, setPermissionMode] = useState("bypassPermissions");
+  const [verbosity, setVerbosity] = useState<Verbosity>(settings.defaultVerbosity);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { events, subagents, info, usage, lastCost, contextWindow } =
+  const { events, info, usage, lastCost, contextWindow } =
     useSessionState(sessionId);
   const ports = useSessionPorts(sessionId);
 
@@ -73,6 +70,8 @@ export function SessionPane({
         contextWindow={contextWindow}
         isStreaming={isStreaming}
         ports={ports}
+        verbosity={verbosity}
+        onCycleVerbosity={() => setVerbosity((v) => v === "low" ? "med" : v === "med" ? "high" : "low")}
       />
 
       {/* Messages */}
@@ -83,21 +82,7 @@ export function SessionPane({
               <p className="text-c-muted text-xs">Send a message to begin.</p>
             </div>
           )}
-          {events.map((event, i) => {
-            // Skip tool_results that were already consumed by a paired Bash block
-            if (event.type === "tool_result" && i > 0) {
-              const prev = events[i - 1];
-              if (prev.type === "tool_use" && (prev.data as { name: string }).name === "Bash") {
-                return null;
-              }
-            }
-            // Pair Bash tool_use with its following tool_result
-            if (event.type === "tool_use" && (event.data as { name: string }).name === "Bash") {
-              const result = i + 1 < events.length && events[i + 1].type === "tool_result" ? events[i + 1] : null;
-              return <BashBlock key={i} event={event} result={result} />;
-            }
-            return <EventBlock key={i} event={event} onRunCommand={onRunCommand} />;
-          })}
+          <EventList events={events} verbosity={verbosity} onRunCommand={onRunCommand} />
           {isStreaming &&
             events.length > 0 &&
             events[events.length - 1].type !== "user_message" && (
@@ -119,12 +104,6 @@ export function SessionPane({
           <div ref={messagesEndRef} />
         </div>
       </div>
-
-      {/* Subagents */}
-      <SubagentPanel subagents={subagents} />
-
-      {/* Process manager */}
-      <ProcessPanel sessionId={sessionId} onKillProcess={onKillProcess} onRunCommand={onRunCommand} onKillRunner={onKillRunner} />
 
       {/* Input */}
       <div className="border-t border-c-border">
@@ -188,6 +167,8 @@ function StatusBar({
   contextWindow,
   isStreaming,
   ports,
+  verbosity,
+  onCycleVerbosity,
 }: {
   info: SessionInfo | null;
   usage: UsageData | null;
@@ -195,6 +176,8 @@ function StatusBar({
   contextWindow: number | null;
   isStreaming: boolean;
   ports: PortInfo[];
+  verbosity: "low" | "med" | "high";
+  onCycleVerbosity: () => void;
 }) {
   const ctxPct =
     usage && contextWindow
@@ -278,15 +261,140 @@ function StatusBar({
         </span>
       )}
 
+      {/* Verbosity toggle */}
+      <button
+        onClick={onCycleVerbosity}
+        className={`ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors ${
+          verbosity === "high"
+            ? "bg-c-accent/15 text-c-accent"
+            : "text-c-muted hover:text-c-text-secondary"
+        }`}
+        title={`Tool detail: ${verbosity} (click to cycle)`}
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+        {verbosity}
+      </button>
+
       {/* Cost */}
       {cost != null && (
-        <span className="ml-auto tabular-nums">
+        <span className="tabular-nums">
           ${cost.toFixed(4)}
         </span>
       )}
     </div>
   );
 }
+
+const MAX_VISIBLE_EVENTS = 200;
+
+/** Memoized event list with windowing — only renders recent events */
+const EventList = memo(function EventList({
+  events,
+  verbosity,
+  onRunCommand,
+}: {
+  events: StreamEvent[];
+  verbosity: Verbosity;
+  onRunCommand?: (cmd: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+
+  // Reset "show all" when session changes (events array identity changes significantly)
+  const prevLenRef = useRef(events.length);
+  if (events.length < prevLenRef.current - 10) {
+    // Session switched — events shrank significantly
+    if (showAll) setShowAll(false);
+  }
+  prevLenRef.current = events.length;
+
+  // Build tool pairing maps — memoized on events array reference
+  const { toolUseIds, toolResultMap } = useMemo(() => {
+    const ids = new Set<string>();
+    const results = new Map<string, StreamEvent>();
+    for (const ev of events) {
+      if (ev.type === "tool_use") {
+        const d = ev.data as { id?: string };
+        if (d.id) ids.add(d.id);
+      }
+      if (ev.type === "tool_result") {
+        const d = ev.data as { toolUseId?: string };
+        if (d.toolUseId) results.set(d.toolUseId, ev);
+      }
+    }
+    return { toolUseIds: ids, toolResultMap: results };
+  }, [events]);
+
+  // Determine which events to render
+  const truncated = !showAll && events.length > MAX_VISIBLE_EVENTS;
+  const startIdx = truncated ? events.length - MAX_VISIBLE_EVENTS : 0;
+  const visibleEvents = truncated ? events.slice(startIdx) : events;
+
+  const isToolEvent = (e: StreamEvent) => e.type === "tool_use" || e.type === "tool_result";
+  const elements: React.ReactNode[] = [];
+
+  if (truncated) {
+    elements.push(
+      <div key="show-older" className="flex justify-center py-2">
+        <button
+          onClick={() => setShowAll(true)}
+          className="text-2xs text-c-muted hover:text-c-accent transition-colors px-3 py-1 rounded border border-c-border-subtle hover:border-c-accent/30"
+        >
+          Show {events.length - MAX_VISIBLE_EVENTS} older messages
+        </button>
+      </div>
+    );
+  }
+
+  let i = 0;
+  while (i < visibleEvents.length) {
+    const event = visibleEvents[i];
+    const globalIdx = startIdx + i;
+
+    if (isToolEvent(event)) {
+      if (verbosity === "low") {
+        i++;
+        continue;
+      }
+
+      if (verbosity === "med") {
+        const toolNames: string[] = [];
+        const start = globalIdx;
+        while (i < visibleEvents.length && isToolEvent(visibleEvents[i])) {
+          if (visibleEvents[i].type === "tool_use") {
+            toolNames.push((visibleEvents[i].data as { name: string }).name);
+          }
+          i++;
+        }
+        elements.push(<ToolSummaryRow key={`ts-${start}`} toolNames={toolNames} />);
+        continue;
+      }
+
+      // High: full paired tool blocks
+      if (event.type === "tool_result") {
+        const d = event.data as { toolUseId?: string };
+        if (d.toolUseId && toolUseIds.has(d.toolUseId)) { i++; continue; }
+      }
+      if (event.type === "tool_use") {
+        const data = event.data as { id?: string; name: string };
+        const result = data.id ? toolResultMap.get(data.id) ?? null : null;
+        if (data.name === "Bash") {
+          elements.push(<BashBlock key={globalIdx} event={event} result={result} />);
+        } else {
+          elements.push(<ToolBlock key={globalIdx} event={event} result={result} />);
+        }
+        i++;
+        continue;
+      }
+    }
+
+    elements.push(<EventBlock key={globalIdx} event={event} onRunCommand={onRunCommand} />);
+    i++;
+  }
+
+  return <>{elements}</>;
+});
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -297,7 +405,28 @@ function fmtTokens(n: number): string {
 /** Detect if inline code looks like a runnable command */
 const CMD_PATTERN = /^(npm|pnpm|yarn|bun|npx|node|python|pip|cargo|go|ruby|php|make|docker|tsx|ts-node)\s/;
 
-function BashBlock({ event, result }: { event: StreamEvent; result: StreamEvent | null }) {
+/** Compact summary for consecutive tool calls in non-verbose mode */
+const ToolSummaryRow = memo(function ToolSummaryRow({ toolNames }: { toolNames: string[] }) {
+  // Count occurrences: e.g. ["Read", "Read", "Grep"] → "2× Read, Grep"
+  const counts = new Map<string, number>();
+  for (const n of toolNames) counts.set(n, (counts.get(n) ?? 0) + 1);
+  const parts = Array.from(counts.entries()).map(([name, count]) =>
+    count > 1 ? `${count}× ${name}` : name
+  );
+
+  return (
+    <div className="py-0.5 animate-fade-in">
+      <div className="flex items-center gap-1.5 text-2xs text-c-muted">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+        <span className="font-mono">{parts.join(", ")}</span>
+      </div>
+    </div>
+  );
+});
+
+const BashBlock = memo(function BashBlock({ event, result }: { event: StreamEvent; result: StreamEvent | null }) {
   const data = event.data as { input: { command?: string } };
   const command = data.input?.command ?? "";
   const output = result
@@ -329,9 +458,124 @@ function BashBlock({ event, result }: { event: StreamEvent; result: StreamEvent 
       </details>
     </div>
   );
+});
+
+/** Summarize tool input for the collapsed header */
+function toolSummary(name: string, input: Record<string, unknown>): string {
+  switch (name) {
+    case "Read":
+      return String(input.file_path ?? "");
+    case "Edit":
+      return String(input.file_path ?? "");
+    case "Write":
+      return String(input.file_path ?? "");
+    case "Glob":
+      return String(input.pattern ?? "");
+    case "Grep":
+      return String(input.pattern ?? "");
+    case "Agent":
+      return String(input.description ?? input.prompt ?? "").slice(0, 80);
+    case "TodoWrite":
+    case "TaskCreate":
+    case "TaskUpdate": {
+      const todos = input.todos ?? input.tasks;
+      if (Array.isArray(todos)) return `${todos.length} item${todos.length === 1 ? "" : "s"}`;
+      return "";
+    }
+    case "WebSearch":
+      return String(input.query ?? "");
+    case "WebFetch":
+      return String(input.url ?? "");
+    default: {
+      // For unknown tools, pick the first short string field
+      for (const v of Object.values(input)) {
+        if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
+      }
+      return "";
+    }
+  }
 }
 
-function EventBlock({ event, onRunCommand }: { event: StreamEvent; onRunCommand?: (cmd: string) => void }) {
+/** Icon for different tool types */
+function ToolIcon({ name }: { name: string }) {
+  // File tools
+  if (["Read", "Edit", "Write"].includes(name)) {
+    return (
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-c-accent flex-shrink-0">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+      </svg>
+    );
+  }
+  // Search tools
+  if (["Glob", "Grep", "WebSearch"].includes(name)) {
+    return (
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-c-accent flex-shrink-0">
+        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+    );
+  }
+  // Default wrench icon
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-c-accent flex-shrink-0">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </svg>
+  );
+}
+
+const ToolBlock = memo(function ToolBlock({ event, result }: { event: StreamEvent; result: StreamEvent | null }) {
+  const data = event.data as { id: string; name: string; input: Record<string, unknown> };
+  const summary = toolSummary(data.name, data.input ?? {});
+  const output = result
+    ? typeof result.data === "string"
+      ? result.data
+      : (result.data as { content?: string })?.content ??
+        JSON.stringify(result.data, null, 2)
+    : null;
+
+  return (
+    <div className="py-0.5 animate-fade-in">
+      <details className="group">
+        <summary className="flex items-center gap-1.5 cursor-pointer select-none text-2xs text-c-text-secondary hover:text-c-text transition-colors">
+          <ToolIcon name={data.name} />
+          <span className="font-mono font-medium">{data.name}</span>
+          {summary && (
+            <span className="font-mono text-c-muted truncate">{summary}</span>
+          )}
+          {!result && (
+            <span className="w-1 h-1 rounded-full bg-c-accent animate-pulse-subtle flex-shrink-0" />
+          )}
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="transition-transform group-open:rotate-90 flex-shrink-0 ml-auto">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </summary>
+        <div className="mt-1 ml-4 space-y-1.5">
+          {/* Tool input */}
+          <details className="group/input">
+            <summary className="text-2xs text-c-muted cursor-pointer hover:text-c-text-secondary transition-colors">
+              Input
+            </summary>
+            <div className="mt-0.5 p-2 bg-c-surface rounded border border-c-border-subtle">
+              <pre className="text-2xs text-c-text-secondary font-mono overflow-x-auto max-h-32 leading-relaxed">
+                {JSON.stringify(data.input, null, 2)}
+              </pre>
+            </div>
+          </details>
+          {/* Tool result */}
+          {output && (
+            <div className="p-2 bg-c-surface rounded border border-c-border-subtle">
+              <pre className="text-2xs text-c-muted font-mono overflow-x-auto max-h-48 whitespace-pre-wrap leading-relaxed">
+                {output}
+              </pre>
+            </div>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+});
+
+const EventBlock = memo(function EventBlock({ event, onRunCommand }: { event: StreamEvent; onRunCommand?: (cmd: string) => void }) {
   if (event.type === "user_message") {
     const data = event.data as { text: string };
     return (
@@ -544,4 +788,4 @@ function EventBlock({ event, onRunCommand }: { event: StreamEvent; onRunCommand?
   }
 
   return null;
-}
+});

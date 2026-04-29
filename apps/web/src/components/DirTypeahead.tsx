@@ -3,8 +3,10 @@ import { useState, useRef, useEffect, useCallback } from "react";
 interface DirTypeaheadProps {
   value: string;
   onChange: (v: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
+  onSubmit?: () => void;
+  onCancel?: () => void;
+  placeholder?: string;
+  className?: string;
 }
 
 export function DirTypeahead({
@@ -12,6 +14,8 @@ export function DirTypeahead({
   onChange,
   onSubmit,
   onCancel,
+  placeholder = "Working directory...",
+  className: inputClassName,
 }: DirTypeaheadProps) {
   const [suggestions, setSuggestions] = useState<{ name: string; path: string }[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(-1);
@@ -71,13 +75,13 @@ export function DirTypeahead({
       if (showSuggestions && selectedIdx >= 0) {
         selectSuggestion(suggestions[selectedIdx].path);
       } else {
-        onSubmit();
+        onSubmit?.();
       }
     } else if (e.key === "Escape") {
       if (showSuggestions) {
         setShowSuggestions(false);
       } else {
-        onCancel();
+        onCancel?.();
       }
     }
   };
@@ -91,11 +95,11 @@ export function DirTypeahead({
         onKeyDown={handleKeyDown}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
         onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
-        placeholder="Working directory..."
-        className="w-full text-2xs font-mono bg-c-surface border border-c-border rounded px-1.5 py-1 text-c-text outline-none focus:border-c-accent/50"
+        placeholder={placeholder}
+        className={inputClassName ?? "w-full text-2xs font-mono bg-c-surface border border-c-border rounded px-1.5 py-1 text-c-text outline-none focus:border-c-accent/50"}
       />
       {showSuggestions && (
-        <div className="absolute z-50 left-0 right-0 mt-0.5 bg-c-bg-raised border border-c-border rounded shadow-lg max-h-32 overflow-y-auto">
+        <div className="absolute z-[100] left-0 right-0 mt-0.5 border border-c-border rounded shadow-lg max-h-32 overflow-y-auto" style={{ backgroundColor: "#1e1e2a" }}>
           {suggestions.map((s, i) => (
             <div
               key={s.path}

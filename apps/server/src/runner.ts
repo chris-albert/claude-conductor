@@ -121,7 +121,7 @@ export class RunnerManager extends EventEmitter {
   private sessionProcesses = new Map<string, Set<string>>();
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private portScanTimer: ReturnType<typeof setInterval> | null = null;
-  private model = "claude-sonnet-4-6";
+  private model = "claude-opus-4-6";
 
   setModel(model: string) {
     this.model = model;

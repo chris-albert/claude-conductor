@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { Session } from "../lib/types";
 import { useSessionPorts } from "../lib/store";
-import { DirTypeahead } from "./DirTypeahead";
 
 interface SidebarProps {
   sessions: Session[];
@@ -10,7 +9,7 @@ interface SidebarProps {
   onNewSession: () => void;
   onDeleteSession: (id: string) => void;
   onRenameSession: (id: string, name: string) => void;
-  onForkSession: (id: string, newCwd: string) => void;
+  onNewWorktree: (sourceSessionId: string) => void;
   onOpenSettings: () => void;
 }
 
@@ -21,7 +20,7 @@ export function Sidebar({
   onNewSession,
   onDeleteSession,
   onRenameSession,
-  onForkSession,
+  onNewWorktree,
   onOpenSettings,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -141,7 +140,7 @@ export function Sidebar({
                 onSelect={() => onSelectSession(session.id)}
                 onDelete={() => onDeleteSession(session.id)}
                 onRename={(name) => onRenameSession(session.id, name)}
-                onFork={(newCwd) => onForkSession(session.id, newCwd)}
+                onNewWorktree={() => onNewWorktree(session.id)}
               />
             ))}
           </div>
@@ -173,7 +172,7 @@ function SessionItem({
   onSelect,
   onDelete,
   onRename,
-  onFork,
+  onNewWorktree,
 }: {
   session: Session;
   isActive: boolean;
@@ -181,22 +180,16 @@ function SessionItem({
   onSelect: () => void;
   onDelete: () => void;
   onRename: (name: string) => void;
-  onFork: (newCwd: string) => void;
+  onNewWorktree: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.name);
-  const [forking, setForking] = useState(false);
-  const [forkCwd, setForkCwd] = useState("");
   const ports = useSessionPorts(session.id);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
   }, [editing]);
-
-  useEffect(() => {
-    if (forking) setForkCwd(session.cwd);
-  }, [forking, session.cwd]);
 
   const commit = () => {
     const trimmed = draft.trim();
@@ -208,13 +201,7 @@ function SessionItem({
     setEditing(false);
   };
 
-  const submitFork = () => {
-    const trimmed = forkCwd.trim();
-    if (trimmed && trimmed !== session.cwd) {
-      onFork(trimmed);
-    }
-    setForking(false);
-  };
+  const isWorktree = !!session.worktreePath;
 
   return (
     <div>
@@ -260,14 +247,18 @@ function SessionItem({
             {ports.length}
           </span>
         )}
-        {!editing && (
+        {/* New worktree — only for sessions already using a worktree */}
+        {!editing && isWorktree && (
           <span
-            onClick={(e) => { e.stopPropagation(); setForking((v) => !v); }}
+            onClick={(e) => { e.stopPropagation(); onNewWorktree(); }}
             className="opacity-0 group-hover:opacity-100 text-c-muted hover:text-c-accent w-3.5 h-3.5 flex items-center justify-center rounded hover:bg-c-accent-subtle"
-            title="Move to new directory"
+            title="New worktree from main"
           >
-            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="6" y1="3" x2="6" y2="15" />
+              <circle cx="18" cy="6" r="3" />
+              <circle cx="6" cy="18" r="3" />
+              <path d="M18 9a9 9 0 0 1-9 9" />
             </svg>
           </span>
         )}
@@ -287,22 +278,6 @@ function SessionItem({
           </span>
         )}
       </div>
-      {forking && (
-        <div className="mx-2 mt-1 mb-1.5 space-y-1" onClick={(e) => e.stopPropagation()}>
-          <DirTypeahead
-            value={forkCwd}
-            onChange={setForkCwd}
-            onSubmit={submitFork}
-            onCancel={() => setForking(false)}
-          />
-          <button
-            onClick={submitFork}
-            className="w-full h-5 text-2xs font-medium bg-c-surface hover:bg-c-surface-hover border border-c-border rounded transition-colors text-c-text-secondary"
-          >
-            Move session here
-          </button>
-        </div>
-      )}
     </div>
   );
 }
