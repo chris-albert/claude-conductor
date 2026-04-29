@@ -8,6 +8,7 @@ import { setupWebSocket } from "./ws.js";
 import { SessionManager } from "./sessions.js";
 import { listDirectory, readFileContent, writeFileContent, getFileStats } from "./files.js";
 import { loadPresets } from "./presets.js";
+import { getSessionDetails } from "./details.js";
 
 export interface ConductorServerOptions {
   projectRoot?: string;
@@ -282,6 +283,16 @@ export function createConductorServer(
       return;
     }
     res.json({ presets: loadPresets(session.cwd) });
+  });
+
+  // Session details: cwd, git branch + status counts, remote/GitHub link, HEAD info
+  app.get("/api/sessions/:id/details", (req, res) => {
+    const session = sessionManager.get(req.params.id);
+    if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+    res.json(getSessionDetails(session.cwd));
   });
 
   // Serve static web app if a directory is provided (used by Electron / standalone)

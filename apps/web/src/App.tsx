@@ -4,6 +4,7 @@ import { EditorPane } from "./components/EditorPane";
 import { SessionPane } from "./components/SessionPane";
 import { ProcessPanel } from "./components/ProcessPanel";
 import { BrowserPanel } from "./components/BrowserPanel";
+import { DetailsPanel } from "./components/DetailsPanel";
 import { SettingsModal } from "./components/SettingsModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { ProcessManagerModal } from "./components/ProcessManagerModal";
@@ -31,7 +32,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [processManagerOpen, setProcessManagerOpen] = useState(false);
-  const [leftTab, setLeftTab] = useState<"explorer" | "processes" | "browser">("explorer");
+  const [leftTab, setLeftTab] = useState<"explorer" | "processes" | "browser" | "details">("explorer");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [authState, setAuthState] = useState<{
     checked: boolean;
@@ -318,6 +319,16 @@ export default function App() {
             >
               Browser
             </button>
+            <button
+              onClick={() => setLeftTab("details")}
+              className={`h-full px-3 text-2xs font-medium uppercase tracking-wider transition-colors border-b-2 ${
+                leftTab === "details"
+                  ? "text-c-text-secondary border-c-accent"
+                  : "text-c-muted border-transparent hover:text-c-text-secondary"
+              }`}
+            >
+              Details
+            </button>
           </div>
           {/* Tab content */}
           <div className="flex-1 min-h-0">
@@ -336,11 +347,19 @@ export default function App() {
                   <p className="text-xs text-c-muted">Select a session to view processes</p>
                 </div>
               )
+            ) : leftTab === "browser" ? (
+              activeSession ? (
+                <BrowserPanel sessionId={activeSession.id} />
+              ) : (
+                <div className="flex items-center justify-center h-full bg-c-bg">
+                  <p className="text-xs text-c-muted">Select a session to view browser</p>
+                </div>
+              )
             ) : activeSession ? (
-              <BrowserPanel sessionId={activeSession.id} />
+              <DetailsPanel sessionId={activeSession.id} />
             ) : (
               <div className="flex items-center justify-center h-full bg-c-bg">
-                <p className="text-xs text-c-muted">Select a session to view browser</p>
+                <p className="text-xs text-c-muted">Select a session to view details</p>
               </div>
             )}
           </div>
