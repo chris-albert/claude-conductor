@@ -325,6 +325,9 @@ export class RunnerManager extends EventEmitter {
       const proc = this.processes.get(id);
       if (proc) processes.push(proc);
     }
+    processes.sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    );
     return { processes };
   }
 
