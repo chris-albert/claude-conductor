@@ -180,12 +180,6 @@ function RunnerProcessRow({ proc, onKill, onRerun }: { proc: RunnerProcess; onKi
     }
   }, [proc.output, showOutput]);
 
-  // Show only "extra" detected ports — i.e. lsof-scanned ports that aren't already
-  // surfaced via a named slot. This filters out worker IPC and ephemeral noise once
-  // the user is using slots, but still surfaces unexpected listeners for debugging.
-  const slotPortSet = new Set(proc.slots.map((s) => s.port));
-  const otherPorts = proc.ports.filter((p) => !slotPortSet.has(p));
-
   return (
     <div className="bg-c-surface/30 rounded border border-c-border-subtle overflow-hidden">
       {/* Header */}
@@ -278,11 +272,6 @@ function RunnerProcessRow({ proc, onKill, onRerun }: { proc: RunnerProcess; onKi
         )}
       </div>
 
-      {/* Other detected ports (lsof scan, minus slot ports) — only if any */}
-      {isRunning && otherPorts.length > 0 && (
-        <OtherPorts ports={otherPorts} />
-      )}
-
       {/* Live output */}
       {showOutput && proc.output && (
         <pre
@@ -291,26 +280,6 @@ function RunnerProcessRow({ proc, onKill, onRerun }: { proc: RunnerProcess; onKi
         >
           {proc.output}
         </pre>
-      )}
-    </div>
-  );
-}
-
-function OtherPorts({ ports }: { ports: number[] }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="px-2 pb-1 -mt-0.5">
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="text-2xs text-c-muted/70 hover:text-c-muted font-mono"
-        title="Other ports detected via lsof scan (likely worker IPC or ephemeral)"
-      >
-        {expanded ? "−" : "+"} {ports.length} other detected
-      </button>
-      {expanded && (
-        <span className="ml-2 font-mono tabular-nums text-2xs text-c-muted/70">
-          {ports.map((p) => `:${p}`).join(" ")}
-        </span>
       )}
     </div>
   );

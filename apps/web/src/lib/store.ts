@@ -107,10 +107,11 @@ export function useSessionPorts(sessionId: string | null): PortInfo[] {
   }
   for (const proc of state.runnerState?.processes ?? []) {
     if (proc.exitCode !== null) continue;
-    for (const port of proc.ports) {
-      if (!seen.has(port)) {
-        seen.add(port);
-        ports.push({ port, process: proc.command, pid: proc.pid, detectedFrom: "scan", detectedAt: "" });
+    // Prefer conductor-allocated slot ports (clean) over lsof-scanned ports (noisy)
+    for (const slot of proc.slots) {
+      if (!seen.has(slot.port)) {
+        seen.add(slot.port);
+        ports.push({ port: slot.port, process: proc.command, pid: proc.pid, detectedFrom: "scan", detectedAt: "" });
       }
     }
   }
