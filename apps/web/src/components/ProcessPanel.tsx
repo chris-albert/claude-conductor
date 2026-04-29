@@ -128,7 +128,6 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
         {/* Command input + optional description / port slots */}
         <div className="space-y-1">
           <div className="flex items-center gap-1.5">
-            <span className="text-c-muted text-2xs">$</span>
             <input
               value={cmdInput}
               onChange={(e) => setCmdInput(e.target.value)}
@@ -144,7 +143,7 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
               Run
             </button>
           </div>
-          <div className="flex items-center gap-1.5 pl-3">
+          <div className="flex items-center gap-1.5">
             <input
               value={descInput}
               onChange={(e) => setDescInput(e.target.value)}
