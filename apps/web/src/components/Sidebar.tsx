@@ -1,6 +1,55 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import type { Session } from "../lib/types";
 import { useSessionPorts } from "../lib/store";
+
+const COLLAPSED_GROUPS_KEY = "conductor-sidebar-collapsed-groups";
+
+interface SessionGroup {
+  key: string;
+  name: string;
+  sessions: { session: Session; index: number }[];
+}
+
+function repoGroupFor(session: Session): { key: string; name: string } {
+  // Worktrees live at <gitRoot>/.conductor/worktrees/<name> — strip that to get the repo root.
+  const wt = session.worktreePath;
+  if (wt) {
+    const match = wt.match(/^(.*)\/\.conductor\/worktrees\/[^/]+\/?$/);
+    const root = match ? match[1] : wt;
+    return { key: root, name: basename(root) };
+  }
+  return { key: session.cwd, name: basename(session.cwd) };
+}
+
+function basename(p: string): string {
+  const trimmed = p.replace(/\/+$/, "");
+  const idx = trimmed.lastIndexOf("/");
+  return idx === -1 ? trimmed : trimmed.slice(idx + 1) || trimmed;
+}
+
+function buildGroups(sessions: Session[]): SessionGroup[] {
+  const map = new Map<string, SessionGroup>();
+  sessions.forEach((session, index) => {
+    const { key, name } = repoGroupFor(session);
+    let group = map.get(key);
+    if (!group) {
+      group = { key, name, sessions: [] };
+      map.set(key, group);
+    }
+    group.sessions.push({ session, index });
+  });
+  return Array.from(map.values());
+}
+
+function loadCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_GROUPS_KEY);
+    if (raw) return new Set(JSON.parse(raw) as string[]);
+  } catch {
+    // ignore
+  }
+  return new Set();
+}
 
 interface SidebarProps {
   sessions: Session[];
@@ -26,6 +75,23 @@ export function Sidebar({
   onOpenProcessManager,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(loadCollapsed);
+
+  const groups = useMemo(() => buildGroups(sessions), [sessions]);
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify(Array.from(next)));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   if (collapsed) {
     return (
@@ -145,18 +211,48 @@ export function Sidebar({
           <p className="text-2xs text-c-muted px-2 py-3 text-center">No sessions</p>
         ) : (
           <div className="space-y-px">
-            {sessions.map((session, i) => (
-              <SessionItem
-                key={session.id}
-                session={session}
-                isActive={session.id === activeSessionId}
-                index={i}
-                onSelect={() => onSelectSession(session.id)}
-                onDelete={() => onDeleteSession(session.id)}
-                onRename={(name) => onRenameSession(session.id, name)}
-                onNewWorktree={() => onNewWorktree(session.id)}
-              />
-            ))}
+            {groups.map((group) => {
+              if (group.sessions.length < 2) {
+                return group.sessions.map(({ session, index }) => (
+                  <SessionItem
+                    key={session.id}
+                    session={session}
+                    isActive={session.id === activeSessionId}
+                    index={index}
+                    indented={false}
+                    onSelect={() => onSelectSession(session.id)}
+                    onDelete={() => onDeleteSession(session.id)}
+                    onRename={(name) => onRenameSession(session.id, name)}
+                    onNewWorktree={() => onNewWorktree(session.id)}
+                  />
+                ));
+              }
+              const isCollapsed = collapsedGroups.has(group.key);
+              return (
+                <div key={group.key}>
+                  <GroupHeader
+                    name={group.name}
+                    count={group.sessions.length}
+                    collapsed={isCollapsed}
+                    onToggle={() => toggleGroup(group.key)}
+                  />
+                  {!isCollapsed &&
+                    group.sessions.map(({ session, index }) => (
+                      <SessionItem
+                        key={session.id}
+                        session={session}
+                        isActive={session.id === activeSessionId}
+                        index={index}
+                        indented
+                        onSelect={() => onSelectSession(session.id)}
+                        onDelete={() => onDeleteSession(session.id)}
+                        onRename={(name) => onRenameSession(session.id, name)}
+                        onNewWorktree={() => onNewWorktree(session.id)}
+                      />
+                    ))}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -193,10 +289,49 @@ export function Sidebar({
   );
 }
 
+function GroupHeader({
+  name,
+  count,
+  collapsed,
+  onToggle,
+}: {
+  name: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className="group w-full flex items-center gap-1 px-2 py-1 mt-1 rounded-md text-left text-c-muted hover:text-c-text-secondary hover:bg-c-surface-hover transition-colors"
+      title={collapsed ? "Expand group" : "Collapse group"}
+    >
+      <svg
+        width="9"
+        height="9"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={`flex-shrink-0 transition-transform ${collapsed ? "" : "rotate-90"}`}
+      >
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+      <span className="truncate flex-1 text-2xs font-semibold uppercase tracking-wider">
+        {name}
+      </span>
+      <span className="text-2xs font-mono tabular-nums opacity-70">{count}</span>
+    </button>
+  );
+}
+
 function SessionItem({
   session,
   isActive,
   index,
+  indented,
   onSelect,
   onDelete,
   onRename,
@@ -205,6 +340,7 @@ function SessionItem({
   session: Session;
   isActive: boolean;
   index: number;
+  indented: boolean;
   onSelect: () => void;
   onDelete: () => void;
   onRename: (name: string) => void;
@@ -240,7 +376,7 @@ function SessionItem({
           setDraft(session.name);
           setEditing(true);
         }}
-        className={`group w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-left cursor-pointer transition-colors ${
+        className={`group w-full flex items-center gap-1.5 ${indented ? "pl-4 pr-2" : "px-2"} py-1.5 rounded-md text-left cursor-pointer transition-colors ${
           isActive
             ? "bg-c-surface-active text-c-text"
             : "text-c-text-secondary hover:bg-c-surface-hover hover:text-c-text"
