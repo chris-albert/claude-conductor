@@ -196,10 +196,7 @@ ${prompt}`;
     }
 
     const seenUUIDs = new Set<string>();
-    let totalInputTokens = 0;
     let totalOutputTokens = 0;
-    let totalCacheRead = 0;
-    let totalCacheCreation = 0;
 
     try {
       for await (const raw of this.session!.stream()) {
@@ -270,18 +267,29 @@ ${prompt}`;
           const message = anyMsg.message as Record<string, unknown>;
           const usage = message?.usage as Record<string, number> | undefined;
           if (usage) {
-            totalInputTokens += usage.input_tokens ?? 0;
-            totalOutputTokens += usage.output_tokens ?? 0;
-            totalCacheRead += usage.cache_read_input_tokens ?? 0;
-            totalCacheCreation += usage.cache_creation_input_tokens ?? 0;
+            // Per-turn breakdown — the API splits each turn's input into:
+            //   input_tokens                  uncached (the new portion)
+            //   cache_read_input_tokens       loaded from prompt cache
+            //   cache_creation_input_tokens   newly written to cache
+            // The sum of those three is the actual prompt size for that turn,
+            // which is what determines context-window utilization. Summing
+            // input_tokens across turns is meaningless (prior turns are already
+            // in the next turn's context, mostly via cache_read), so emit the
+            // latest turn's values directly rather than running totals.
+            const turnInput = usage.input_tokens ?? 0;
+            const turnOutput = usage.output_tokens ?? 0;
+            const turnCacheRead = usage.cache_read_input_tokens ?? 0;
+            const turnCacheCreation = usage.cache_creation_input_tokens ?? 0;
+            totalOutputTokens += turnOutput; // cumulative output for cost display
             yield {
               type: "usage_update",
               data: {
-                inputTokens: totalInputTokens,
+                inputTokens: turnInput,
                 outputTokens: totalOutputTokens,
-                cacheRead: totalCacheRead,
-                cacheCreation: totalCacheCreation,
-                totalTokens: totalInputTokens + totalOutputTokens,
+                cacheRead: turnCacheRead,
+                cacheCreation: turnCacheCreation,
+                // Total prompt size for this turn — the right number for ctx %
+                totalTokens: turnInput + turnCacheRead + turnCacheCreation,
               },
             };
           }
