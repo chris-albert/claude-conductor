@@ -221,7 +221,15 @@ export class RunnerManager extends EventEmitter {
     this.emitChange(sessionId);
 
     // Allocate ports, then start the auto-fix loop
-    void this.allocateAndStart(id, sessionId, command, cwd, opts.slots ?? []);
+    this.allocateAndStart(id, sessionId, command, cwd, opts.slots ?? []).catch((err) => {
+      console.error(`[conductor] runner ${id} crashed:`, err);
+      this.appendOutput(id, `\n━━ Internal error: ${err?.message ?? err} ━━\n`);
+      const p = this.processes.get(id);
+      if (p && p.exitCode === null) {
+        p.exitCode = 1;
+        this.emitChange(p.sessionId);
+      }
+    });
     this.startPortScanning();
 
     return proc;
@@ -290,12 +298,16 @@ export class RunnerManager extends EventEmitter {
     this.emitChange(proc.sessionId);
 
     // Escalate to SIGKILL after 3 seconds for any survivors
-    setTimeout(async () => {
-      const remaining = proc.pid > 0 ? await this.getDescendantPids(proc.pid) : [];
-      for (const pid of remaining) {
-        try { process.kill(pid, "SIGKILL"); } catch { /* */ }
-      }
-      try { if (!child.killed) child.kill("SIGKILL"); } catch { /* */ }
+    setTimeout(() => {
+      (async () => {
+        const remaining = proc.pid > 0 ? await this.getDescendantPids(proc.pid) : [];
+        for (const pid of remaining) {
+          try { process.kill(pid, "SIGKILL"); } catch { /* */ }
+        }
+        try { if (!child.killed) child.kill("SIGKILL"); } catch { /* */ }
+      })().catch((err) => {
+        console.error("[conductor] SIGKILL escalation error:", err);
+      });
     }, 3000);
 
     return true;
@@ -671,7 +683,11 @@ export class RunnerManager extends EventEmitter {
 
   private startPortScanning() {
     if (this.portScanTimer) return;
-    this.portScanTimer = setInterval(() => this.scanPorts(), 3000);
+    this.portScanTimer = setInterval(() => {
+      this.scanPorts().catch((err) => {
+        console.error("[conductor] scanPorts error:", err);
+      });
+    }, 3000);
   }
 
   private stopPortScanning() {

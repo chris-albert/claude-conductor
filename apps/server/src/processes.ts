@@ -195,7 +195,11 @@ export class ProcessManager extends EventEmitter {
     this.pidToSession.delete(pid);
     this.pidToToolUseId.delete(pid);
     this.baselinePids.delete(pid);
-    setTimeout(() => this.scan(), 500);
+    setTimeout(() => {
+      this.scan().catch((err) => {
+        console.error("[conductor] processes.scan error:", err);
+      });
+    }, 500);
 
     return termOk;
   }
@@ -493,10 +497,18 @@ export class ProcessManager extends EventEmitter {
   private startScanning() {
     if (this.scanTimer) return;
     // Take an initial baseline snapshot
-    this.scanListening().then((procs) => {
-      this.baselinePids = new Set(procs.map((p) => p.pid));
-    });
-    this.scanTimer = setInterval(() => this.scan(), this.scanIntervalMs);
+    this.scanListening()
+      .then((procs) => {
+        this.baselinePids = new Set(procs.map((p) => p.pid));
+      })
+      .catch((err) => {
+        console.error("[conductor] baseline scan error:", err);
+      });
+    this.scanTimer = setInterval(() => {
+      this.scan().catch((err) => {
+        console.error("[conductor] processes.scan error:", err);
+      });
+    }, this.scanIntervalMs);
   }
 
   private stopScanning() {
