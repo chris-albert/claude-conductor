@@ -1,12 +1,49 @@
 import { useState, useRef, useEffect } from "react";
 import { useSessionProcesses, useRunnerState } from "../lib/store";
-import type { SessionProcessState, TrackedCommand, RunnerProcess, ProcessPreset } from "../lib/types";
+import type { SessionProcessState, TrackedCommand, RunnerProcess, ProcessPreset, SlotSpec } from "../lib/types";
 
 interface ProcessPanelProps {
   sessionId: string;
   onKillProcess: (pid: number) => void;
-  onRunCommand: (command: string, opts?: { description?: string; slots?: string[] }) => void;
+  onRunCommand: (command: string, opts?: { description?: string; slots?: SlotSpec[] }) => void;
   onKillRunner: (runnerId: string) => void;
+}
+
+function useStickyToggle(key: string): [boolean, () => void] {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () => {
+    setOpen((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(key, next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+  return [open, toggle];
+}
+
+function parseSlotsInput(input: string): SlotSpec[] {
+  return input
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const eq = entry.indexOf("=");
+      if (eq === -1) return { name: entry };
+      const name = entry.slice(0, eq).trim();
+      const port = parseInt(entry.slice(eq + 1).trim(), 10);
+      return Number.isFinite(port) && port > 0 ? { name, port } : { name };
+    })
+    .filter((s) => s.name.length > 0);
 }
 
 export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRunner }: ProcessPanelProps) {
@@ -17,6 +54,8 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
   const [slotsInput, setSlotsInput] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [presets, setPresets] = useState<ProcessPreset[]>([]);
+  const [recentOpen, toggleRecent] = useStickyToggle("conductor-recent-commands-open");
+  const [claudeOpen, toggleClaude] = useStickyToggle("conductor-claude-processes-open");
 
   // Load presets from <session.cwd>/conductor.config.json; poll for hot-reload
   useEffect(() => {
@@ -51,10 +90,7 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
   const handleRunSubmit = () => {
     const cmd = cmdInput.trim();
     if (!cmd) return;
-    const slots = slotsInput
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const slots = parseSlotsInput(slotsInput);
     onRunCommand(cmd, {
       description: descInput.trim() || undefined,
       slots: slots.length > 0 ? slots : undefined,
@@ -129,7 +165,7 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
             <button
               onClick={handleRunSubmit}
               disabled={!cmdInput.trim()}
-              className="px-2 py-1 text-2xs font-medium bg-c-accent hover:bg-c-accent-hover disabled:opacity-30 text-white rounded transition-colors"
+              className="px-2 py-1 text-2xs font-medium bg-gradient-to-br from-[#8e7ff7] to-[#5b4ed4] hover:from-[#9d8ffa] hover:to-[#6c5dde] disabled:opacity-30 text-white rounded shadow-sm transition-all"
             >
               Run
             </button>
@@ -147,8 +183,8 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
                 value={slotsInput}
                 onChange={(e) => setSlotsInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleRunSubmit(); }}
-                placeholder="Port slots: WEB, API"
-                title="Comma-separated slot names. Conductor allocates a port for each and injects ${NAME}_PORT env vars. Leave empty to inject just PORT."
+                placeholder="Port slots: WEB, AUTH=3000"
+                title="Comma-separated slot names. Conductor allocates a port for each and injects ${NAME}_PORT env vars. Use NAME=PORT to pin a specific port (e.g. for OAuth redirect URIs). Leave empty to inject just PORT."
                 className="w-44 bg-transparent border border-c-border-subtle/60 rounded px-2 py-0.5 text-2xs font-mono text-c-text-secondary outline-none focus:border-c-accent/40 placeholder:text-c-muted/50"
               />
             </div>
@@ -167,7 +203,9 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
                   title={[
                     preset.description,
                     `$ ${preset.command}`,
-                    preset.slots && preset.slots.length > 0 ? `slots: ${preset.slots.join(", ")}` : null,
+                    preset.slots && preset.slots.length > 0
+                      ? `slots: ${preset.slots.map((s) => (s.port ? `${s.name}=${s.port}` : s.name)).join(", ")}`
+                      : null,
                   ].filter(Boolean).join("\n")}
                   className="flex items-center gap-1 px-2 py-0.5 text-2xs font-medium bg-c-surface/40 hover:bg-c-surface border border-c-border-subtle hover:border-c-accent/40 text-c-text-secondary hover:text-c-text rounded transition-colors"
                 >
@@ -193,7 +231,9 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
                   onKill={() => onKillRunner(proc.id)}
                   onRerun={() => onRunCommand(proc.command, {
                     description: proc.description,
-                    slots: proc.slots.length > 0 ? proc.slots.map((s) => s.name) : undefined,
+                    slots: proc.slots.length > 0
+                      ? proc.slots.map((s) => (s.fixed ? { name: s.name, port: s.port } : { name: s.name }))
+                      : undefined,
                   })}
                 />
               ))}
@@ -204,24 +244,70 @@ export function ProcessPanel({ sessionId, onKillProcess, onRunCommand, onKillRun
         {/* Claude-detected processes */}
         {hasProcesses && (
           <div>
-            <p className="text-2xs text-c-muted mb-1.5 uppercase tracking-wider">Claude</p>
-            <div className="space-y-px">
-              {processState.processes.map((proc) => (
-                <ProcessRow key={proc.pid} proc={proc} onKill={() => onKillProcess(proc.pid)} />
-              ))}
-            </div>
+            <button
+              onClick={toggleClaude}
+              className="w-full flex items-center gap-1 mb-1.5 text-c-muted hover:text-c-text-secondary transition-colors"
+            >
+              <svg
+                width="8"
+                height="8"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`transition-transform ${claudeOpen ? "rotate-90" : ""}`}
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              <span className="text-2xs uppercase tracking-wider">Claude</span>
+              <span className="text-2xs font-mono tabular-nums opacity-70 ml-1">
+                {processState.processes.length}
+              </span>
+            </button>
+            {claudeOpen && (
+              <div className="space-y-px">
+                {processState.processes.map((proc) => (
+                  <ProcessRow key={proc.pid} proc={proc} onKill={() => onKillProcess(proc.pid)} />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {/* Recent commands */}
         {hasCommands && (
           <div>
-            <p className="text-2xs text-c-muted mb-1.5 uppercase tracking-wider">Recent commands</p>
-            <div className="space-y-px">
-              {processState.commands.slice(-25).reverse().map((cmd) => (
-                <CommandRow key={cmd.toolUseId} cmd={cmd} />
-              ))}
-            </div>
+            <button
+              onClick={toggleRecent}
+              className="w-full flex items-center gap-1 mb-1.5 text-c-muted hover:text-c-text-secondary transition-colors"
+            >
+              <svg
+                width="8"
+                height="8"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`transition-transform ${recentOpen ? "rotate-90" : ""}`}
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              <span className="text-2xs uppercase tracking-wider">Recent commands</span>
+              <span className="text-2xs font-mono tabular-nums opacity-70 ml-1">
+                {processState.commands.length}
+              </span>
+            </button>
+            {recentOpen && (
+              <div className="space-y-px">
+                {processState.commands.slice(-25).reverse().map((cmd) => (
+                  <CommandRow key={cmd.toolUseId} cmd={cmd} />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -302,9 +388,14 @@ function RunnerProcessRow({ proc, onKill, onRerun }: { proc: RunnerProcess; onKi
                 href={`http://localhost:${slot.port}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-c-accent hover:text-c-accent-hover hover:underline"
-                title={`${slot.name}_PORT=${slot.port}`}
+                className="text-c-accent hover:text-c-accent-hover hover:underline inline-flex items-center gap-0.5"
+                title={`${slot.name}_PORT=${slot.port}${slot.fixed ? " (pinned via config)" : ""}`}
               >
+                {slot.fixed && (
+                  <svg width="7" height="7" viewBox="0 0 24 24" fill="currentColor" className="opacity-70">
+                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2z" />
+                  </svg>
+                )}
                 {slot.name === "PORT" ? `:${slot.port}` : `${slot.name.toLowerCase()}:${slot.port}`}
               </a>
             ))}

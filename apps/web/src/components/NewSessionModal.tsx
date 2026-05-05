@@ -197,7 +197,7 @@ export function NewSessionModal({
           </button>
           <button
             onClick={handleSubmit}
-            className="px-4 py-1.5 text-xs font-medium bg-c-accent hover:bg-c-accent-hover text-white rounded-md transition-colors"
+            className="px-4 py-1.5 text-xs font-medium bg-gradient-to-br from-[#8e7ff7] to-[#5b4ed4] hover:from-[#9d8ffa] hover:to-[#6c5dde] text-white rounded-md shadow-sm transition-all"
           >
             Create
           </button>

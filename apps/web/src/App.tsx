@@ -192,6 +192,20 @@ export default function App() {
     [send]
   );
 
+  const handleInterrupt = useCallback(
+    (sessionId: string) => {
+      send({ type: "interrupt_session", sessionId });
+    },
+    [send]
+  );
+
+  const handleRestartAgent = useCallback(
+    (sessionId: string) => {
+      send({ type: "restart_agent", sessionId });
+    },
+    [send]
+  );
+
   return (
     <div
       className="relative flex h-full"
@@ -254,7 +268,7 @@ export default function App() {
                 <button
                   onClick={handleSubmitApiKey}
                   disabled={authState.loading || !apiKeyInput.trim()}
-                  className="w-full px-4 py-2.5 text-sm font-medium bg-c-accent hover:bg-c-accent-hover disabled:opacity-50 text-white rounded-lg transition-colors"
+                  className="w-full px-4 py-2.5 text-sm font-medium bg-gradient-to-br from-[#8e7ff7] to-[#5b4ed4] hover:from-[#9d8ffa] hover:to-[#6c5dde] disabled:opacity-50 text-white rounded-lg shadow-md transition-all"
                 >
                   {authState.loading ? "Saving..." : "Connect"}
                 </button>
@@ -372,6 +386,8 @@ export default function App() {
               sessionId={activeSession.id}
               onSendPrompt={handleSendPrompt}
               onRunCommand={(command, opts) => send({ type: "run_command", sessionId: activeSession.id, command, ...opts })}
+              onInterrupt={handleInterrupt}
+              onRestartAgent={handleRestartAgent}
               isStreaming={activeSession.status === "streaming"}
             />
           ) : (
@@ -400,7 +416,7 @@ export default function App() {
                 </p>
                 <button
                   onClick={() => setNewSessionOpen(true)}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-c-accent hover:bg-c-accent-hover text-sm font-medium text-white rounded-lg transition-colors"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-br from-[#8e7ff7] to-[#5b4ed4] hover:from-[#9d8ffa] hover:to-[#6c5dde] text-sm font-medium text-white rounded-lg shadow-md transition-all"
                 >
                   <svg
                     width="14"

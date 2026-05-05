@@ -140,6 +140,11 @@ export class AgentSession {
       env: {
         ...process.env,
         CONDUCTOR_SESSION_CWD: this.cwd,
+        // Silence the SDK's internal telemetry exporter — it spams
+        // "1P event logging: N events failed to export" rejections that
+        // bubble up as console errors when the network is intermittent.
+        DISABLE_TELEMETRY: "1",
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       },
     };
 

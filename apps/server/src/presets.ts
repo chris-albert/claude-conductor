@@ -1,11 +1,17 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
+export interface SlotSpec {
+  name: string;
+  /** If set, conductor uses this exact port instead of allocating a free one. */
+  port?: number;
+}
+
 export interface ProcessPreset {
   name: string;
   description?: string;
   command: string;
-  slots?: string[];
+  slots?: SlotSpec[];
 }
 
 interface PresetsFile {
@@ -39,10 +45,25 @@ export function loadPresets(cwd: string): ProcessPreset[] {
       name: p.name,
       command: p.command,
       description: typeof p.description === "string" ? p.description : undefined,
-      slots: Array.isArray(p.slots)
-        ? p.slots.filter((s): s is string => typeof s === "string")
-        : undefined,
+      slots: Array.isArray(p.slots) ? parseSlots(p.slots) : undefined,
     });
   }
   return presets;
+}
+
+function parseSlots(raw: unknown[]): SlotSpec[] {
+  const out: SlotSpec[] = [];
+  for (const entry of raw) {
+    if (typeof entry === "string") {
+      out.push({ name: entry });
+    } else if (entry && typeof entry === "object") {
+      const e = entry as Record<string, unknown>;
+      if (typeof e.name !== "string") continue;
+      const port = typeof e.port === "number" && Number.isFinite(e.port) && e.port > 0
+        ? Math.floor(e.port)
+        : undefined;
+      out.push({ name: e.name, port });
+    }
+  }
+  return out;
 }

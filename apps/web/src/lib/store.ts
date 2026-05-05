@@ -22,6 +22,8 @@ interface SessionState {
   ports: PortInfo[];
   processState: SessionProcessState;
   runnerState: RunnerState;
+  /** Wall-clock ms when the most recent event was received from the SDK. */
+  lastEventAt: number | null;
 }
 
 interface Store {
@@ -67,11 +69,18 @@ function newSessionState(): SessionState {
     ports: [],
     processState: { commands: [], processes: [] },
     runnerState: { processes: [] },
+    lastEventAt: null,
   };
 }
 
 export function useStore() {
   return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+export function useSessionLastEventAt(sessionId: string | null): number | null {
+  const s = useStore();
+  if (!sessionId) return null;
+  return s.sessionStates.get(sessionId)?.lastEventAt ?? null;
 }
 
 export function useActiveSession() {
@@ -301,9 +310,22 @@ export function updateSessionStatus(id: string, status: Session["status"]) {
   emitChange();
 }
 
+// Conductor-side events that don't reflect SDK turn activity — used to filter
+// out background noise from the "time since last event" stuck-detector.
+const NON_TURN_EVENTS = new Set([
+  "process_update",
+  "runner_update",
+  "port_change",
+  "file_change",
+  "auth_status",
+]);
+
 export function addSessionEvent(sessionId: string, event: StreamEvent) {
-  const state = store.sessionStates.get(sessionId);
-  if (!state) return;
+  const existing = store.sessionStates.get(sessionId);
+  if (!existing) return;
+  const state = NON_TURN_EVENTS.has(event.type)
+    ? existing
+    : { ...existing, lastEventAt: Date.now() };
 
   if (event.type === "session_info") {
     store.sessionStates = new Map(store.sessionStates).set(sessionId, {

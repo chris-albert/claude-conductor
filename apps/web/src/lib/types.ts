@@ -93,6 +93,13 @@ export interface SessionProcessState {
 export interface PortSlot {
   name: string;
   port: number;
+  /** True if pinned via config; false/undefined if conductor allocated it. */
+  fixed?: boolean;
+}
+
+export interface SlotSpec {
+  name: string;
+  port?: number;
 }
 
 export interface RunnerProcess {
@@ -119,5 +126,5 @@ export interface ProcessPreset {
   name: string;
   description?: string;
   command: string;
-  slots?: string[];
+  slots?: SlotSpec[];
 }

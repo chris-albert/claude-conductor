@@ -8,19 +8,41 @@ interface FileTreeProps {
 }
 
 export function FileTree({ rootPath, onSelectFile, selectedFile }: FileTreeProps) {
+  const [entries, setEntries] = useState<FileEntry[]>([]);
+
+  useEffect(() => {
+    if (!rootPath) return;
+    fetch(`/api/files/list?path=${encodeURIComponent(rootPath)}`)
+      .then((r) => r.json())
+      .then((data) => setEntries(Array.isArray(data) ? data : []))
+      .catch(() => setEntries([]));
+  }, [rootPath]);
+
   if (!rootPath) return null;
 
   return (
     <div className="text-xs h-full select-none">
       <div className="py-0.5">
-        <DirectoryNode
-          path={rootPath}
-          name={rootPath.split("/").pop() ?? "root"}
-          depth={0}
-          onSelectFile={onSelectFile}
-          selectedFile={selectedFile}
-          defaultOpen
-        />
+        {entries.map((entry) =>
+          entry.type === "directory" ? (
+            <DirectoryNode
+              key={entry.path}
+              path={entry.path}
+              name={entry.name}
+              depth={0}
+              onSelectFile={onSelectFile}
+              selectedFile={selectedFile}
+            />
+          ) : (
+            <FileButton
+              key={entry.path}
+              entry={entry}
+              depth={0}
+              selected={selectedFile === entry.path}
+              onSelectFile={onSelectFile}
+            />
+          )
+        )}
       </div>
     </div>
   );
@@ -62,22 +84,37 @@ function DirectoryNode({
         entry.type === "directory" ? (
           <DirectoryNode key={entry.path} path={entry.path} name={entry.name} depth={depth + 1} onSelectFile={onSelectFile} selectedFile={selectedFile} />
         ) : (
-          <button
+          <FileButton
             key={entry.path}
-            onClick={() => onSelectFile(entry.path)}
-            className={`flex items-center w-full h-[22px] text-left truncate transition-colors ${
-              selectedFile === entry.path
-                ? "bg-c-accent-subtle text-c-text"
-                : "text-c-muted hover:bg-c-surface-hover hover:text-c-text-secondary"
-            }`}
-            style={{ paddingLeft: `${(depth + 1) * 12 + 6}px` }}
-          >
-            <FileIcon name={entry.name} />
-            <span className="truncate text-xs">{entry.name}</span>
-          </button>
+            entry={entry}
+            depth={depth + 1}
+            selected={selectedFile === entry.path}
+            onSelectFile={onSelectFile}
+          />
         )
       )}
     </div>
+  );
+}
+
+function FileButton({
+  entry, depth, selected, onSelectFile,
+}: {
+  entry: FileEntry; depth: number; selected: boolean; onSelectFile: (path: string) => void;
+}) {
+  return (
+    <button
+      onClick={() => onSelectFile(entry.path)}
+      className={`flex items-center w-full h-[22px] text-left truncate transition-colors ${
+        selected
+          ? "bg-c-accent-subtle text-c-text"
+          : "text-c-muted hover:bg-c-surface-hover hover:text-c-text-secondary"
+      }`}
+      style={{ paddingLeft: `${depth * 12 + 6}px` }}
+    >
+      <FileIcon name={entry.name} />
+      <span className="truncate text-xs">{entry.name}</span>
+    </button>
   );
 }
 

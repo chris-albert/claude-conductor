@@ -6,6 +6,7 @@ import {
   loadProcessSessionState,
   saveProcessSessionState,
 } from "./persistence.js";
+import { isProtectedPid } from "./protectedPids.js";
 
 export interface ProcessInfo {
   pid: number;
@@ -96,6 +97,20 @@ export class ProcessManager extends EventEmitter {
     if (this.sessions.size === 0) this.stopScanning();
   }
 
+  /**
+   * Kill every Claude-spawned process attributed to this session, then forget it.
+   * Used when a session is being deleted — leaving stray dev servers running
+   * after the user closes the session is surprising.
+   */
+  async cleanupSession(sessionId: string) {
+    const pids: number[] = [];
+    for (const [pid, sid] of this.pidToSession) {
+      if (sid === sessionId) pids.push(pid);
+    }
+    await Promise.all(pids.map((pid) => this.killProcess(pid)));
+    this.untrackSession(sessionId);
+  }
+
   /** Record a Bash command that Claude executed */
   addCommand(sessionId: string, command: string, toolUseId: string) {
     const state = this.sessions.get(sessionId);
@@ -167,6 +182,12 @@ export class ProcessManager extends EventEmitter {
   }
 
   async killProcess(pid: number): Promise<boolean> {
+    // Refuse to signal protected pids (conductor itself, its parent shell, turbo)
+    // and refuse pid <= 0 — kill(0) signals the whole process group on POSIX.
+    if (isProtectedPid(pid)) {
+      console.warn(`[conductor] refusing to kill protected pid ${pid}`);
+      return false;
+    }
     // Send SIGTERM first
     const termOk = await new Promise<boolean>((resolve) => {
       execFile("kill", ["-TERM", String(pid)], { timeout: 5000 }, (err) => {

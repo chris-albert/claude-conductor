@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useMemo, memo, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useSessionState, useSessionPorts } from "../lib/store";
+import { useSessionState, useSessionLastEventAt } from "../lib/store";
 import { useSettings } from "../lib/settings";
-import type { StreamEvent, UsageData, SessionInfo, PortInfo } from "../lib/types";
+import type { StreamEvent, UsageData, SessionInfo } from "../lib/types";
 import type { Verbosity } from "../lib/settings";
 
 const MODELS = [
@@ -23,6 +23,8 @@ interface SessionPaneProps {
   sessionId: string;
   onSendPrompt: (sessionId: string, prompt: string, model?: string, permissionMode?: string) => void;
   onRunCommand?: (command: string, opts?: { description?: string; slots?: string[] }) => void;
+  onInterrupt?: (sessionId: string) => void;
+  onRestartAgent?: (sessionId: string) => void;
   isStreaming: boolean;
 }
 
@@ -30,6 +32,8 @@ export function SessionPane({
   sessionId,
   onSendPrompt,
   onRunCommand,
+  onInterrupt,
+  onRestartAgent,
   isStreaming,
 }: SessionPaneProps) {
   const settings = useSettings();
@@ -40,7 +44,6 @@ export function SessionPane({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { events, info, usage, lastCost, contextWindow } =
     useSessionState(sessionId);
-  const ports = useSessionPorts(sessionId);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -69,9 +72,9 @@ export function SessionPane({
         cost={lastCost}
         contextWindow={contextWindow}
         isStreaming={isStreaming}
-        ports={ports}
         verbosity={verbosity}
         onCycleVerbosity={() => setVerbosity((v) => v === "low" ? "med" : v === "med" ? "high" : "low")}
+        onRestartAgent={() => onRestartAgent?.(sessionId)}
       />
 
       {/* Messages */}
@@ -86,20 +89,7 @@ export function SessionPane({
           {isStreaming &&
             events.length > 0 &&
             events[events.length - 1].type !== "user_message" && (
-              <div className="flex items-center gap-1.5 py-1.5 px-1">
-                <span
-                  className="w-1 h-1 rounded-full bg-c-muted animate-pulse-subtle"
-                  style={{ animationDelay: "0ms" }}
-                />
-                <span
-                  className="w-1 h-1 rounded-full bg-c-muted animate-pulse-subtle"
-                  style={{ animationDelay: "150ms" }}
-                />
-                <span
-                  className="w-1 h-1 rounded-full bg-c-muted animate-pulse-subtle"
-                  style={{ animationDelay: "300ms" }}
-                />
-              </div>
+              <ThinkingIndicator sessionId={sessionId} onInterrupt={() => onInterrupt?.(sessionId)} />
             )}
           <div ref={messagesEndRef} />
         </div>
@@ -142,16 +132,29 @@ export function SessionPane({
               <span className="text-2xs text-c-muted ml-auto">
                 Enter send, Shift+Enter newline
               </span>
-              <button
-                type="submit"
-                disabled={isStreaming || !prompt.trim()}
-                className="w-7 h-7 flex items-center justify-center rounded-md bg-c-accent hover:bg-c-accent-hover text-white disabled:opacity-30 disabled:hover:bg-c-accent transition-colors flex-shrink-0"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="22" y1="2" x2="11" y2="13" />
-                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                </svg>
-              </button>
+              {isStreaming ? (
+                <button
+                  type="button"
+                  onClick={() => onInterrupt?.(sessionId)}
+                  title="Stop the in-flight prompt"
+                  className="w-7 h-7 flex items-center justify-center rounded-md bg-c-error hover:bg-red-500 text-white shadow-sm transition-all flex-shrink-0"
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="1" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!prompt.trim()}
+                  className="w-7 h-7 flex items-center justify-center rounded-md bg-gradient-to-br from-[#8e7ff7] to-[#5b4ed4] hover:from-[#9d8ffa] hover:to-[#6c5dde] text-white shadow-sm disabled:opacity-30 transition-all flex-shrink-0"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+              )}
             </div>
           </div>
         </form>
@@ -166,18 +169,18 @@ function StatusBar({
   cost,
   contextWindow,
   isStreaming,
-  ports,
   verbosity,
   onCycleVerbosity,
+  onRestartAgent,
 }: {
   info: SessionInfo | null;
   usage: UsageData | null;
   cost: number | null;
   contextWindow: number | null;
   isStreaming: boolean;
-  ports: PortInfo[];
   verbosity: "low" | "med" | "high";
   onCycleVerbosity: () => void;
+  onRestartAgent: () => void;
 }) {
   const ctxPct =
     usage && contextWindow
@@ -197,29 +200,6 @@ function StatusBar({
       {/* Model */}
       {info?.model && (
         <span className="font-mono">{info.model.replace("claude-", "").split("-202")[0]}</span>
-      )}
-
-      {/* Active ports */}
-      {ports.length > 0 && (
-        <span className="flex items-center gap-1.5">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-c-success">
-            <circle cx="12" cy="12" r="2" />
-            <path d="M16.24 7.76a6 6 0 0 1 0 8.49" />
-            <path d="M7.76 16.24a6 6 0 0 1 0-8.49" />
-          </svg>
-          {ports.map((p) => (
-            <a
-              key={p.port}
-              href={`http://localhost:${p.port}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-c-accent hover:text-c-accent-hover hover:underline tabular-nums"
-              title={`${p.process || "unknown"} (PID ${p.pid || "?"})\nDetected: ${p.detectedFrom}`}
-            >
-              :{p.port}
-            </a>
-          ))}
-        </span>
       )}
 
       {/* Context usage bar */}
@@ -283,6 +263,22 @@ function StatusBar({
           ${cost.toFixed(4)}
         </span>
       )}
+
+      {/* Restart agent — kicks the SDK process if a session gets stuck */}
+      <button
+        onClick={() => {
+          if (confirm("Restart the agent?\n\nThis closes the underlying Claude Code process and reopens it on the next prompt. Your conversation history is preserved.")) {
+            onRestartAgent();
+          }
+        }}
+        title="Restart agent (use if the session is stuck)"
+        className="text-c-muted hover:text-c-text p-1 rounded hover:bg-c-surface-hover transition-colors"
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="23 4 23 10 17 10" />
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+        </svg>
+      </button>
     </div>
   );
 }
@@ -395,6 +391,60 @@ const EventList = memo(function EventList({
 
   return <>{elements}</>;
 });
+
+function ThinkingIndicator({
+  sessionId,
+  onInterrupt,
+}: {
+  sessionId: string;
+  onInterrupt?: () => void;
+}) {
+  const lastEventAt = useSessionLastEventAt(sessionId);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const elapsedSec = lastEventAt ? Math.floor((now - lastEventAt) / 1000) : 0;
+  const showElapsed = elapsedSec >= 5;
+  const looksStuck = elapsedSec >= 30;
+
+  // Color shifts: muted (normal) → amber (might be stuck) at 30s+
+  const dotColor = looksStuck ? "bg-c-warning" : "bg-c-muted";
+  const textColor = looksStuck ? "text-c-warning" : "text-c-muted";
+
+  return (
+    <div className="flex items-center gap-1.5 py-1.5 px-1">
+      <span className={`w-1 h-1 rounded-full animate-pulse-subtle ${dotColor}`} style={{ animationDelay: "0ms" }} />
+      <span className={`w-1 h-1 rounded-full animate-pulse-subtle ${dotColor}`} style={{ animationDelay: "150ms" }} />
+      <span className={`w-1 h-1 rounded-full animate-pulse-subtle ${dotColor}`} style={{ animationDelay: "300ms" }} />
+      {showElapsed && (
+        <span className={`text-2xs tabular-nums ml-1 ${textColor}`}>
+          {fmtElapsed(elapsedSec)}
+        </span>
+      )}
+      {looksStuck && onInterrupt && (
+        <button
+          type="button"
+          onClick={onInterrupt}
+          className="text-2xs text-c-warning/80 hover:text-c-warning underline ml-1"
+          title="No activity for 30s+ — restart the agent"
+        >
+          stuck? stop
+        </button>
+      )}
+    </div>
+  );
+}
+
+function fmtElapsed(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -580,7 +630,7 @@ const EventBlock = memo(function EventBlock({ event, onRunCommand }: { event: St
     const data = event.data as { text: string };
     return (
       <div className="flex justify-end py-1 animate-fade-in">
-        <div className="max-w-[85%] bg-c-user border border-c-user-border rounded-lg rounded-br-sm px-3 py-1.5">
+        <div className="max-w-[85%] bg-gradient-to-br from-[#3a4a78] to-[#2a3a5c] border border-c-user-border rounded-lg rounded-br-sm px-3 py-1.5 shadow-sm">
           <p className="text-[13px] whitespace-pre-wrap leading-relaxed text-c-text">
             {data.text}
           </p>
@@ -635,7 +685,7 @@ const EventBlock = memo(function EventBlock({ event, onRunCommand }: { event: St
                   {isRunnableBlock && (
                     <button
                       onClick={() => onRunCommand(text)}
-                      className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-[10px] font-medium bg-c-accent hover:bg-c-accent-hover text-white rounded opacity-0 group-hover/codeblock:opacity-100 transition-opacity"
+                      className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-[10px] font-medium bg-gradient-to-br from-[#8e7ff7] to-[#5b4ed4] hover:from-[#9d8ffa] hover:to-[#6c5dde] text-white rounded shadow-sm opacity-0 group-hover/codeblock:opacity-100 transition-all"
                       title={`Run "${text}" in the process panel`}
                     >
                       <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor">

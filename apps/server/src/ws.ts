@@ -8,7 +8,7 @@ import { ProcessManager } from "./processes.js";
 import { RunnerManager } from "./runner.js";
 
 interface ClientMessage {
-  type: "start_session" | "create_session" | "kill_session" | "fork_session" | "kill_process" | "run_command" | "kill_runner";
+  type: "start_session" | "create_session" | "kill_session" | "fork_session" | "kill_process" | "run_command" | "kill_runner" | "interrupt_session" | "restart_agent";
   prompt?: string;
   sessionId?: string;
   sourceSessionId?: string;
@@ -21,7 +21,7 @@ interface ClientMessage {
   command?: string;
   runnerId?: string;
   description?: string;
-  slots?: string[];
+  slots?: (string | { name: string; port?: number })[];
 }
 
 export interface WebSocketContext {
@@ -279,7 +279,7 @@ export function setupWebSocket(
         }
         fileWatcher.stopWatching(msg.sessionId);
         portMonitor.untrackSession(msg.sessionId);
-        processManager.untrackSession(msg.sessionId);
+        processManager.cleanupSession(msg.sessionId);
         runnerManager.cleanupSession(msg.sessionId);
         ws.send(JSON.stringify({ type: "session_killed", data: { sessionId: msg.sessionId } }));
         return;
@@ -304,9 +304,34 @@ export function setupWebSocket(
         const cwd = msg.cwd || session.cwd;
         const proc = runnerManager.smartSpawn(msg.sessionId, msg.command, cwd, {
           description: msg.description,
-          slots: msg.slots,
+          slots: msg.slots?.map((s) => (typeof s === "string" ? { name: s } : s)),
         });
         ws.send(JSON.stringify({ type: "runner_spawned", sessionId: msg.sessionId, data: proc }));
+        return;
+      }
+
+      // --- Interrupt streaming / Restart agent — both tear down the SDK session so the
+      //     next prompt spawns a fresh one and resumes via sdkSessionId. Light "stop" is
+      //     not safe here because aborting the outer iterator leaves the SDK's internal
+      //     stream wedged; the next send() then fails with "only prompt commands are
+      //     supported in streaming mode". The conductor session, runners, watchers, and
+      //     history are preserved. ---
+      if ((msg.type === "interrupt_session" || msg.type === "restart_agent") && msg.sessionId) {
+        const ac = activeAborts.get(msg.sessionId);
+        if (ac) {
+          ac.abort();
+          activeAborts.delete(msg.sessionId);
+        }
+        const agent = agentSessions.get(msg.sessionId);
+        if (agent) {
+          try { agent.close(); } catch { /* */ }
+          agentSessions.delete(msg.sessionId);
+        }
+        sessionManager.updateStatus(msg.sessionId, "complete");
+        const event = { type: "session_complete", sessionId: msg.sessionId, data: { interrupted: true, restarted: true } };
+        for (const client of wss.clients) {
+          if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(event));
+        }
         return;
       }
 
@@ -341,16 +366,26 @@ export function setupWebSocket(
     });
   });
 
-  // Cleanup on server shutdown
-  process.on("SIGTERM", () => {
-    fileWatcher.stopAll();
-    portMonitor.stopAll();
-    processManager.stopAll();
-    runnerManager.stopAll();
-    for (const [, agent] of agentSessions) agent.close();
-    agentSessions.clear();
-    for (const [, ac] of activeAborts) ac.abort();
-  });
+  // Cleanup on server shutdown. Without an explicit exit Node suppresses the
+  // default SIGTERM termination once a handler is registered, leaving tsx to
+  // force-kill us a few seconds later. Cleanup is best-effort and synchronous;
+  // exit immediately so hot-reload restarts are clean.
+  const shutdown = (signal: NodeJS.Signals) => {
+    try {
+      fileWatcher.stopAll();
+      portMonitor.stopAll();
+      processManager.stopAll();
+      runnerManager.stopAll();
+      for (const [, agent] of agentSessions) agent.close();
+      agentSessions.clear();
+      for (const [, ac] of activeAborts) ac.abort();
+    } catch (err) {
+      console.error("[conductor] shutdown error:", err);
+    }
+    process.exit(signal === "SIGTERM" ? 0 : 130);
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 
   return { wss, processManager, runnerManager };
 }

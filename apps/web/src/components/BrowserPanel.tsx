@@ -113,7 +113,6 @@ export function BrowserPanel({ sessionId }: BrowserPanelProps) {
             src={effectiveUrl}
             className="w-full h-full border-0"
             title="Browser preview"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
           />
         ) : (
           <div className="flex items-center justify-center h-full">

@@ -6,11 +6,20 @@ import {
   loadRunnerSessionState,
   saveRunnerSessionState,
 } from "./persistence.js";
+import { isProtectedPid } from "./protectedPids.js";
 
 export interface PortSlot {
   /** Slot name (uppercase env var prefix, e.g. "WEB" → WEB_PORT). "PORT" for the unnamed default. */
   name: string;
   port: number;
+  /** True if the port was specified by config (not auto-allocated). */
+  fixed?: boolean;
+}
+
+export interface SlotSpec {
+  name: string;
+  /** If set, use this exact port instead of allocating a free one. */
+  port?: number;
 }
 
 export interface RunnerProcess {
@@ -35,8 +44,8 @@ export interface RunnerState {
 
 export interface SpawnOptions {
   description?: string;
-  /** Named port slots, e.g. ["WEB", "API"]. Empty → conductor injects PORT only. */
-  slots?: string[];
+  /** Named port slots. Empty → conductor injects PORT only. */
+  slots?: SlotSpec[];
 }
 
 function normalizeSlotName(name: string): string {
@@ -240,26 +249,26 @@ export class RunnerManager extends EventEmitter {
     sessionId: string,
     command: string,
     cwd: string,
-    slotNames: string[],
+    slotSpecs: SlotSpec[],
   ) {
     const proc = this.processes.get(id);
     if (!proc) return;
 
     const envAdditions: Record<string, string> = {};
     try {
-      if (slotNames.length === 0) {
+      if (slotSpecs.length === 0) {
         // Default: inject a single PORT for the common case
         const port = await allocatePort();
         envAdditions.PORT = String(port);
         proc.slots = [{ name: "PORT", port }];
       } else {
-        const ports = await allocatePorts(slotNames.length);
         const slots: PortSlot[] = [];
-        for (let i = 0; i < slotNames.length; i++) {
-          const name = normalizeSlotName(slotNames[i]);
+        for (const spec of slotSpecs) {
+          const name = normalizeSlotName(spec.name);
+          const port = typeof spec.port === "number" ? spec.port : await allocatePort();
           const envKey = name === "PORT" ? "PORT" : `${name}_PORT`;
-          envAdditions[envKey] = String(ports[i]);
-          slots.push({ name, port: ports[i] });
+          envAdditions[envKey] = String(port);
+          slots.push({ name, port, fixed: typeof spec.port === "number" });
         }
         proc.slots = slots;
       }
@@ -283,11 +292,14 @@ export class RunnerManager extends EventEmitter {
     const proc = this.processes.get(runnerId);
     if (!child || !proc) return false;
 
-    // Kill the entire process tree (shell → npm → node, etc.)
+    // Kill the entire process tree (shell → npm → node, etc.).
+    // Guard: skip pids in the conductor host's own ancestor chain so a runner
+    // whose tree overlaps with conductor's parent shell can't SIGTERM us.
     const descendants = proc.pid > 0 ? await this.getDescendantPids(proc.pid) : [];
+    const safeDescendants = descendants.filter((pid) => !isProtectedPid(pid));
 
     // Kill descendants bottom-up first, then the root
-    for (const pid of descendants.reverse()) {
+    for (const pid of safeDescendants.reverse()) {
       try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
     }
     try { child.kill("SIGTERM"); } catch { /* already dead */ }
@@ -302,6 +314,7 @@ export class RunnerManager extends EventEmitter {
       (async () => {
         const remaining = proc.pid > 0 ? await this.getDescendantPids(proc.pid) : [];
         for (const pid of remaining) {
+          if (isProtectedPid(pid)) continue;
           try { process.kill(pid, "SIGKILL"); } catch { /* */ }
         }
         try { if (!child.killed) child.kill("SIGKILL"); } catch { /* */ }

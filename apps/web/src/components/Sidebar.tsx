@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import type { Session } from "../lib/types";
-import { useSessionPorts } from "../lib/store";
 
 const COLLAPSED_GROUPS_KEY = "conductor-sidebar-collapsed-groups";
 
@@ -113,7 +112,7 @@ export function Sidebar({
         <div className="py-2">
           <button
             onClick={onNewSession}
-            className="w-7 h-7 flex items-center justify-center bg-c-accent hover:bg-c-accent-hover text-white rounded-md transition-colors"
+            className="w-7 h-7 flex items-center justify-center bg-gradient-to-br from-[#8e7ff7] to-[#5b4ed4] hover:from-[#9d8ffa] hover:to-[#6c5dde] text-white rounded-md shadow-sm transition-all"
             title="New session"
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -196,7 +195,7 @@ export function Sidebar({
       <div className="p-2">
         <button
           onClick={onNewSession}
-          className="w-full h-7 flex items-center justify-center gap-1 text-xs font-medium bg-c-accent hover:bg-c-accent-hover text-white rounded-md transition-colors"
+          className="w-full h-7 flex items-center justify-center gap-1 text-xs font-medium bg-gradient-to-br from-[#8e7ff7] to-[#5b4ed4] hover:from-[#9d8ffa] hover:to-[#6c5dde] text-white rounded-md shadow-sm transition-all"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -212,7 +211,11 @@ export function Sidebar({
         ) : (
           <div className="space-y-px">
             {groups.map((group) => {
-              if (group.sessions.length < 2) {
+              // Show repo header for any group with 2+ sessions, OR any group containing
+              // a worktree (so even a single worktree gets grouped under its repo).
+              const worktreeSession = group.sessions.find(({ session }) => !!session.worktreePath);
+              const showHeader = group.sessions.length >= 2 || !!worktreeSession;
+              if (!showHeader) {
                 return group.sessions.map(({ session, index }) => (
                   <SessionItem
                     key={session.id}
@@ -223,7 +226,6 @@ export function Sidebar({
                     onSelect={() => onSelectSession(session.id)}
                     onDelete={() => onDeleteSession(session.id)}
                     onRename={(name) => onRenameSession(session.id, name)}
-                    onNewWorktree={() => onNewWorktree(session.id)}
                   />
                 ));
               }
@@ -235,6 +237,11 @@ export function Sidebar({
                     count={group.sessions.length}
                     collapsed={isCollapsed}
                     onToggle={() => toggleGroup(group.key)}
+                    onNewWorktree={
+                      worktreeSession
+                        ? () => onNewWorktree(worktreeSession.session.id)
+                        : undefined
+                    }
                   />
                   {!isCollapsed &&
                     group.sessions.map(({ session, index }) => (
@@ -247,7 +254,6 @@ export function Sidebar({
                         onSelect={() => onSelectSession(session.id)}
                         onDelete={() => onDeleteSession(session.id)}
                         onRename={(name) => onRenameSession(session.id, name)}
-                        onNewWorktree={() => onNewWorktree(session.id)}
                       />
                     ))}
                 </div>
@@ -294,16 +300,18 @@ function GroupHeader({
   count,
   collapsed,
   onToggle,
+  onNewWorktree,
 }: {
   name: string;
   count: number;
   collapsed: boolean;
   onToggle: () => void;
+  onNewWorktree?: () => void;
 }) {
   return (
-    <button
+    <div
       onClick={onToggle}
-      className="group w-full flex items-center gap-1 px-2 py-1 mt-1 rounded-md text-left text-c-muted hover:text-c-text-secondary hover:bg-c-surface-hover transition-colors"
+      className="group w-full flex items-center gap-1 px-2 py-1 mt-1 rounded-md text-left text-c-muted hover:text-c-text-secondary hover:bg-c-surface-hover transition-colors cursor-pointer"
       title={collapsed ? "Expand group" : "Collapse group"}
     >
       <svg
@@ -322,8 +330,22 @@ function GroupHeader({
       <span className="truncate flex-1 text-2xs font-semibold uppercase tracking-wider">
         {name}
       </span>
+      {onNewWorktree && (
+        <span
+          onClick={(e) => { e.stopPropagation(); onNewWorktree(); }}
+          className="opacity-0 group-hover:opacity-100 text-c-muted hover:text-c-accent w-3.5 h-3.5 flex items-center justify-center rounded hover:bg-c-accent-subtle"
+          title="New worktree from main"
+        >
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="6" y1="3" x2="6" y2="15" />
+            <circle cx="18" cy="6" r="3" />
+            <circle cx="6" cy="18" r="3" />
+            <path d="M18 9a9 9 0 0 1-9 9" />
+          </svg>
+        </span>
+      )}
       <span className="text-2xs font-mono tabular-nums opacity-70">{count}</span>
-    </button>
+    </div>
   );
 }
 
@@ -335,7 +357,6 @@ function SessionItem({
   onSelect,
   onDelete,
   onRename,
-  onNewWorktree,
 }: {
   session: Session;
   isActive: boolean;
@@ -344,11 +365,9 @@ function SessionItem({
   onSelect: () => void;
   onDelete: () => void;
   onRename: (name: string) => void;
-  onNewWorktree: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.name);
-  const ports = useSessionPorts(session.id);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -364,8 +383,6 @@ function SessionItem({
     }
     setEditing(false);
   };
-
-  const isWorktree = !!session.worktreePath;
 
   return (
     <div>
@@ -398,33 +415,6 @@ function SessionItem({
           />
         ) : (
           <span className="truncate flex-1 text-xs">{session.name}</span>
-        )}
-        {!editing && ports.length > 0 && (
-          <span
-            className="flex items-center gap-0.5 text-2xs text-c-success font-mono tabular-nums"
-            title={ports.map((p) => `:${p.port}`).join(", ")}
-          >
-            <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="flex-shrink-0">
-              <circle cx="12" cy="12" r="2" />
-              <path d="M16.24 7.76a6 6 0 0 1 0 8.49" />
-            </svg>
-            {ports.length}
-          </span>
-        )}
-        {/* New worktree — only for sessions already using a worktree */}
-        {!editing && isWorktree && (
-          <span
-            onClick={(e) => { e.stopPropagation(); onNewWorktree(); }}
-            className="opacity-0 group-hover:opacity-100 text-c-muted hover:text-c-accent w-3.5 h-3.5 flex items-center justify-center rounded hover:bg-c-accent-subtle"
-            title="New worktree from main"
-          >
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="6" y1="3" x2="6" y2="15" />
-              <circle cx="18" cy="6" r="3" />
-              <circle cx="6" cy="18" r="3" />
-              <path d="M18 9a9 9 0 0 1-9 9" />
-            </svg>
-          </span>
         )}
         {!editing && index < 9 && (
           <span className="text-2xs text-c-muted font-mono opacity-0 group-hover:opacity-100">
